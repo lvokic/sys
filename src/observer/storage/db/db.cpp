@@ -100,19 +100,17 @@ RC Db::create_table(const char *table_name, int attribute_count, const AttrInfoS
   return RC::SUCCESS;
 }
 
-RC Db::drop_table(const char *table_name) {
-  RC rc = RC::SUCCESS;
-  //check table exist
-  if (opened_tables_.count(table_name) == 0) {
-    LOG_WARN("%s table does not exist.", table_name);
+RC Db::drop_table(const char *table_name) 
+{
+  auto iter = opened_tables_.find(table_name);
+  if (iter == opened_tables_.end()) {
     return RC::SCHEMA_TABLE_NOT_EXIST;
   }
-
-  Table *table = opened_tables_[table_name];
-  rc = table->destroy(path_.c_str());
+  Table *table = iter->second;
+  RC rc = table->destroy(path_.c_str());
   if (rc != RC::SUCCESS) return rc;
-  
-  opened_tables_.erase(table_name);
+
+  opened_tables_.erase(iter);
   delete table;
   return RC::SUCCESS;
 }
