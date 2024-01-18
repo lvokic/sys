@@ -26,6 +26,18 @@ int compare_int(void *arg1, void *arg2)
   return v1 - v2;
 }
 
+int compare_int64(void *arg1, void *arg2) {
+  int64_t v1 = *(int64_t *)arg1;
+  int64_t v2 = *(int64_t *)arg2;
+  if (v1 > v2) {
+    return 1;
+  } 
+  if (v1 < v2) {
+    return -1;
+  }
+  return 0;
+}
+
 int compare_float(void *arg1, void *arg2)
 {
   float v1 = *(float *)arg1;

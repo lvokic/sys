@@ -14,6 +14,7 @@ See the Mulan PSL v2 for more details. */
 
 #pragma once
 
+#include "sql/parser/date.h"
 #include <string>
 
 /**
@@ -25,6 +26,7 @@ enum AttrType
   UNDEFINED,
   CHARS,          ///< 字符串类型
   INTS,           ///< 整数类型(4字节)
+  DATES,          ///< 日期类型(4字节)
   FLOATS,         ///< 浮点数类型(4字节)
   BOOLEANS,       ///< boolean类型，当前不是由parser解析出来的，是程序内部使用的
 };
@@ -49,6 +51,7 @@ public:
   explicit Value(int val);
   explicit Value(float val);
   explicit Value(bool val);
+  explicit Value(Date date);
   explicit Value(const char *s, int len = 0);
 
   Value(const Value &other) = default;
@@ -67,6 +70,7 @@ public:
   void set_float(float val);
   void set_boolean(bool val);
   void set_string(const char *s, int len = 0);
+  void set_date(Date date);
   void set_value(const Value &value);
 
   std::string to_string() const;
@@ -93,6 +97,14 @@ public:
   float get_float() const;
   std::string get_string() const;
   bool get_boolean() const;
+  Date get_date() const;
+
+public:
+  /**
+   * 语法分析层面是否可以将from转换为to
+   */
+  static bool convert(AttrType from, AttrType to, Value &value);
+  static bool check_value(const Value &v);
 
 private:
   AttrType attr_type_ = UNDEFINED;
@@ -102,6 +114,7 @@ private:
     int int_value_;
     float float_value_;
     bool bool_value_;
+    Date date_value_;
   } num_value_;
   std::string str_value_;
 };
