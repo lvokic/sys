@@ -1,0 +1,16 @@
+[submodule "deps/3rd/libevent"]
+	path = deps/3rd/libevent
+	url = https://gitee.com/hand-pub-template/libevent.git
+	ignore = dirty
+[submodule "deps/3rd/jsoncpp"]
+	path = deps/3rd/jsoncpp
+	url = https://gitee.com/kolonse_zhjsh/jsoncpp.git
+	ignore = dirty
+[submodule "deps/3rd/googletest"]
+	path = deps/3rd/googletest
+	url = https://gitee.com/itsrealkk/googletest.git
+	ignore = dirty
+[submodule "deps/3rd/benchmark"]
+	path = deps/3rd/benchmark
+	url = https://gitee.com/kevinying16/benchmark.git
+	ignore = dirty
