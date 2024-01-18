@@ -100,6 +100,23 @@ RC Db::create_table(const char *table_name, int attribute_count, const AttrInfoS
   return RC::SUCCESS;
 }
 
+RC Db::drop_table(const char *table_name) {
+  RC rc = RC::SUCCESS;
+  //check table exist
+  if (opened_tables_.count(table_name) == 0) {
+    LOG_WARN("%s table does not exist.", table_name);
+    return RC::SCHEMA_TABLE_NOT_EXIST;
+  }
+
+  Table *table = opened_tables_[table_name];
+  rc = table->destroy(path_.c_str());
+  if (rc != RC::SUCCESS) return rc;
+  
+  opened_tables_.erase(table_name);
+  delete table;
+  return RC::SUCCESS;
+}
+
 Table *Db::find_table(const char *table_name) const
 {
   std::unordered_map<std::string, Table *>::const_iterator iter = opened_tables_.find(table_name);
