@@ -17,6 +17,8 @@ See the Mulan PSL v2 for more details. */
 #include "sql/parser/date.h"
 #include <string>
 
+const int INVALID_COMPARE = std::numeric_limits<int>::min();
+
 /**
  * @brief 属性的类型
  * 
@@ -118,3 +120,5 @@ private:
   } num_value_;
   std::string str_value_;
 };
+
+AttrType AttrTypeCompare(AttrType a, AttrType b);

@@ -23,7 +23,7 @@ const char *ATTR_TYPE_NAME[] = {"undefined", "chars", "ints", "floats", "boolean
 
 const char *attr_type_to_string(AttrType type)
 {
-  if (type >= UNDEFINED && type <= FLOATS) {
+  if (type >= UNDEFINED && type <= BOOLEANS) {
     return ATTR_TYPE_NAME[type];
   }
   return "unknown";
@@ -50,7 +50,7 @@ Value::Value(Date date) { set_date(date); }
 
 void Value::set_data(char *data, int length)
 {
-  switch (attr_type_) {
+  switch (attr_type()) {
     case CHARS: {
       set_string(data, length);
     } break;
@@ -113,6 +113,7 @@ void Value::set_date(Date date) {
 
 void Value::set_value(const Value &value)
 {
+  if (&value == this) return;
   switch (value.attr_type_) {
     case INTS: {
       set_int(value.get_int());
@@ -199,15 +200,19 @@ int Value::compare(const Value &other) const
         LOG_WARN("unsupported type: %d", this->attr_type_);
       }
     }
-  } else if (this->attr_type_ == INTS && other.attr_type_ == FLOATS) {
-    float this_data = this->num_value_.int_value_;
-    return common::compare_float((void *)&this_data, (void *)&other.num_value_.float_value_);
-  } else if (this->attr_type_ == FLOATS && other.attr_type_ == INTS) {
-    float other_data = other.num_value_.int_value_;
-    return common::compare_float((void *)&this->num_value_.float_value_, (void *)&other_data);
+  } 
+
+  auto target_type = AttrTypeCompare(this->attr_type_, other.attr_type_);
+  if (target_type == UNDEFINED) 
+    return INVALID_COMPARE;
+  
+  Value a = *this;
+  Value b = other;
+
+  if (!convert(a.attr_type_, target_type, a) || !convert(b.attr_type_, target_type, b)) {
+    return INVALID_COMPARE;
   }
-  LOG_WARN("not supported");
-  return -1;  // TODO return rc?
+  return a.compare(b);
 }
 
 int Value::get_int() const
@@ -346,4 +351,26 @@ Date Value::get_date() const {
   case CHARS: return Date(str_value_);
   default: return INVALID_DATE;
   }
+}
+
+AttrType AttrTypeCompare(AttrType a, AttrType b) {
+  if (a == b) return a;
+  if (a > b) std::swap(a, b);
+  switch(a) {
+    case UNDEFINED: return UNDEFINED;
+    case CHARS: {
+      if (b == INTS)
+        return FLOATS;
+      return b;
+    }
+    case INTS: {
+      if (b == DATES)
+        return UNDEFINED;
+      return b;
+    }
+    case DATES: return UNDEFINED;
+    case FLOATS: return UNDEFINED;
+    case BOOLEANS: return BOOLEANS;
+  }
+  return UNDEFINED;
 }

@@ -92,9 +92,8 @@ std::string Date::to_string(const Date &date, const std::string &format) {
             flag = false;
         } else if (x == '%') {
             flag = true;
-        } else {
+        } else 
             ret += x;
-        }
     }
     return ret;
 }
