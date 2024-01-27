@@ -22,7 +22,6 @@ class Record;
 class DiskBufferPool;
 class RecordFileHandler;
 class RecordFileScanner;
-class ConditionFilter;
 class DefaultConditionFilter;
 class Index;
 class IndexScanner;
@@ -77,6 +76,8 @@ public:
    */
   RC make_record(int value_num, const Value *values, Record &record);
 
+  RC make_record(char *data, int len, Record &record);
+
   /**
    * @brief 在当前的表中插入一条记录
    * @details 在表文件和索引中插入关联数据。这里只管在表中插入数据，不关心事务相关操作。
@@ -90,7 +91,10 @@ public:
   RC recover_insert_record(Record &record);
 
   // TODO refactor
-  RC create_index(Trx *trx, const FieldMeta *field_meta, const char *index_name);
+  RC create_index(Trx *trx, const std::vector<FieldMeta> &field_meta, const char *index_name, bool unique);
+  RC drop_index(int idx);
+  RC drop_index(const char *index_name);
+  RC drop_all_indexes();
 
   RC get_record_scanner(RecordFileScanner &scanner, Trx *trx, bool readonly);
 
@@ -104,6 +108,7 @@ public:
   const char *name() const;
 
   const TableMeta &table_meta() const;
+  TableMeta &table_meta();
 
   RC sync();
 
@@ -117,6 +122,9 @@ private:
 public:
   Index *find_index(const char *index_name) const;
   Index *find_index_by_field(const char *field_name) const;
+
+private:
+  RC flush_table_meta_file(TableMeta &new_table_meta);
 
 private:
   std::string base_dir_;

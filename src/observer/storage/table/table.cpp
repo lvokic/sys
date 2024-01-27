@@ -23,7 +23,6 @@ See the Mulan PSL v2 for more details. */
 #include "common/lang/string.h"
 #include "storage/buffer/disk_buffer_pool.h"
 #include "storage/record/record_manager.h"
-#include "storage/common/condition_filter.h"
 #include "storage/common/meta_util.h"
 #include "storage/index/index.h"
 #include "storage/index/bplus_tree_index.h"
@@ -184,25 +183,17 @@ RC Table::open(const char *meta_file, const char *base_dir)
 
   base_dir_ = base_dir;
 
-  const int index_num = table_meta_.index_num();
+  const int index_num = table_meta().index_num();
   for (int i = 0; i < index_num; i++) {
-    const IndexMeta *index_meta = table_meta_.index(i);
-    const FieldMeta *field_meta = table_meta_.field(index_meta->field());
-    if (field_meta == nullptr) {
-      LOG_ERROR("Found invalid index meta info which has a non-exists field. table=%s, index=%s, field=%s",
-                name(), index_meta->name(), index_meta->field());
-      // skip cleanup
-      //  do all cleanup action in destructive Table function
-      return RC::INTERNAL;
-    }
+    const IndexMeta *index_meta = table_meta().index(i);
 
     BplusTreeIndex *index = new BplusTreeIndex();
     std::string index_file = table_index_file(base_dir, name(), index_meta->name());
-    rc = index->open(index_file.c_str(), *index_meta, *field_meta);
+    rc = index->open(index_file.c_str(), this, *index_meta);
     if (rc != RC::SUCCESS) {
       delete index;
-      LOG_ERROR("Failed to open index. table=%s, index=%s, file=%s, rc=%s",
-                name(), index_meta->name(), index_file.c_str(), strrc(rc));
+      LOG_ERROR("Failed to open index. table=%s, index=%s, file=%s, rc=%s", name(), index_meta->name(),
+                index_file.c_str(), strrc(rc));
       // skip cleanup
       //  do all cleanup action in destructive Table function.
       return rc;
@@ -289,14 +280,17 @@ RC Table::recover_insert_record(Record &record)
   return rc;
 }
 
-const char *Table::name() const
-{
-  return table_meta_.name();
+const char *Table::name() const { return table_meta().name(); }
+
+const TableMeta &Table::table_meta() const { return const_cast<Table *>(this)->table_meta(); }
+
+TableMeta &Table::table_meta() {
+  return table_meta_;
 }
 
-const TableMeta &Table::table_meta() const
-{
-  return table_meta_;
+RC Table::make_record(char *data, int len, Record &record) {
+  record.set_data(data, len);
+  return RC::SUCCESS;
 }
 
 RC Table::make_record(int value_num, const Value *values, Record &record)
@@ -310,17 +304,20 @@ RC Table::make_record(int value_num, const Value *values, Record &record)
   const int normal_field_start_index = table_meta_.sys_field_num();
   for (int i = 0; i < value_num; i++) {
     const FieldMeta *field = table_meta_.field(i + normal_field_start_index);
-    const Value &value = values[i];
+    Value &value = const_cast<Value &>(values[i]);
     if (field->type() != value.attr_type()) {
-      LOG_ERROR("Invalid value type. table name =%s, field name=%s, type=%d, but given=%d",
-                table_meta_.name(), field->name(), field->type(), value.attr_type());
-      return RC::SCHEMA_FIELD_TYPE_MISMATCH;
+      if (!Value::convert(value.attr_type(), field->type(), value)) {
+        LOG_ERROR("Invalid value type. table name =%s, field name=%s, type=%d, but given=%d", table_meta().name(),
+                  field->name(), field->type(), value.attr_type());
+        return RC::SCHEMA_FIELD_TYPE_MISMATCH;
+      }
     }
   }
 
   // 复制所有字段的值
   int record_size = table_meta_.record_size();
   char *record_data = (char *)malloc(record_size);
+  memset(record_data, 0, record_size);
 
   for (int i = 0; i < value_num; i++) {
     const FieldMeta *field = table_meta_.field(i + normal_field_start_index);
@@ -372,25 +369,25 @@ RC Table::get_record_scanner(RecordFileScanner &scanner, Trx *trx, bool readonly
   return rc;
 }
 
-RC Table::create_index(Trx *trx, const FieldMeta *field_meta, const char *index_name)
-{
-  if (common::is_blank(index_name) || nullptr == field_meta) {
+RC Table::create_index(Trx *trx, const std::vector<FieldMeta> &field_meta, const char *index_name, bool unique) {
+  if (common::is_blank(index_name) || field_meta.empty()) {
     LOG_INFO("Invalid input arguments, table name is %s, index_name is blank or attribute_name is blank", name());
     return RC::INVALID_ARGUMENT;
   }
 
+  auto real_meta = field_meta;
+
   IndexMeta new_index_meta;
-  RC rc = new_index_meta.init(index_name, *field_meta);
+  RC rc = new_index_meta.init(index_name, real_meta, unique);
   if (rc != RC::SUCCESS) {
-    LOG_INFO("Failed to init IndexMeta in table:%s, index_name:%s, field_name:%s", 
-             name(), index_name, field_meta->name());
+    LOG_INFO("Failed to init IndexMeta in table:%s, index_name:%s", name(), index_name);
     return rc;
   }
 
   // 创建索引相关数据
   BplusTreeIndex *index = new BplusTreeIndex();
   std::string index_file = table_index_file(base_dir_.c_str(), name(), index_name);
-  rc = index->create(index_file.c_str(), new_index_meta, *field_meta);
+  rc = index->create(index_file.c_str(), this, new_index_meta);
   if (rc != RC::SUCCESS) {
     delete index;
     LOG_ERROR("Failed to create bplus tree index. file name=%s, rc=%d:%s", index_file.c_str(), rc, strrc(rc));
@@ -399,10 +396,9 @@ RC Table::create_index(Trx *trx, const FieldMeta *field_meta, const char *index_
 
   // 遍历当前的所有数据，插入这个索引
   RecordFileScanner scanner;
-  rc = get_record_scanner(scanner, trx, true/*readonly*/);
+  rc = get_record_scanner(scanner, trx, true /*readonly*/);
   if (rc != RC::SUCCESS) {
-    LOG_WARN("failed to create scanner while creating index. table=%s, index=%s, rc=%s", 
-             name(), index_name, strrc(rc));
+    LOG_WARN("failed to create scanner while creating index. table=%s, index=%s, rc=%s", name(), index_name, strrc(rc));
     return rc;
   }
 
@@ -410,60 +406,97 @@ RC Table::create_index(Trx *trx, const FieldMeta *field_meta, const char *index_
   while (scanner.has_next()) {
     rc = scanner.next(record);
     if (rc != RC::SUCCESS) {
-      LOG_WARN("failed to scan records while creating index. table=%s, index=%s, rc=%s",
-               name(), index_name, strrc(rc));
+      LOG_WARN("failed to scan records while creating index. table=%s, index=%s, rc=%s", name(), index_name, strrc(rc));
       return rc;
     }
     rc = index->insert_entry(record.data(), &record.rid());
     if (rc != RC::SUCCESS) {
-      LOG_WARN("failed to insert record into index while creating index. table=%s, index=%s, rc=%s",
-               name(), index_name, strrc(rc));
-      return rc;         
+      LOG_WARN("failed to insert record into index while creating index. table=%s, index=%s, rc=%s", name(), index_name,
+               strrc(rc));
+      return rc;
     }
   }
   scanner.close_scan();
   LOG_INFO("inserted all records into new index. table=%s, index=%s", name(), index_name);
-  
+
   indexes_.push_back(index);
 
   /// 接下来将这个索引放到表的元数据中
-  TableMeta new_table_meta(table_meta_);
+  TableMeta new_table_meta(table_meta());
   rc = new_table_meta.add_index(new_index_meta);
   if (rc != RC::SUCCESS) {
     LOG_ERROR("Failed to add index (%s) on table (%s). error=%d:%s", index_name, name(), rc, strrc(rc));
     return rc;
   }
-
-  /// 内存中有一份元数据，磁盘文件也有一份元数据。修改磁盘文件时，先创建一个临时文件，写入完成后再rename为正式文件
-  /// 这样可以防止文件内容不完整
-  // 创建元数据临时文件
-  std::string tmp_file = table_meta_file(base_dir_.c_str(), name()) + ".tmp";
-  std::fstream fs;
-  fs.open(tmp_file, std::ios_base::out | std::ios_base::binary | std::ios_base::trunc);
-  if (!fs.is_open()) {
-    LOG_ERROR("Failed to open file for write. file name=%s, errmsg=%s", tmp_file.c_str(), strerror(errno));
-    return RC::IOERR_OPEN;  // 创建索引中途出错，要做还原操作
+  rc = flush_table_meta_file(new_table_meta);
+  if (rc != RC::SUCCESS) {
+    LOG_ERROR("Failed to edit meta file while adding index (%s) on table (%s). error=%d:%s", index_name, name(), rc,
+              strrc(rc));
+    return rc;
   }
-  if (new_table_meta.serialize(fs) < 0) {
-    LOG_ERROR("Failed to dump new table meta to file: %s. sys err=%d:%s", tmp_file.c_str(), errno, strerror(errno));
-    return RC::IOERR_WRITE;
-  }
-  fs.close();
-
-  // 覆盖原始元数据文件
-  std::string meta_file = table_meta_file(base_dir_.c_str(), name());
-  int ret = rename(tmp_file.c_str(), meta_file.c_str());
-  if (ret != 0) {
-    LOG_ERROR("Failed to rename tmp meta file (%s) to normal meta file (%s) while creating index (%s) on table (%s). "
-              "system error=%d:%s",
-              tmp_file.c_str(), meta_file.c_str(), index_name, name(), errno, strerror(errno));
-    return RC::IOERR_WRITE;
-  }
-
-  table_meta_.swap(new_table_meta);
-
-  LOG_INFO("Successfully added a new index (%s) on the table (%s)", index_name, name());
   return rc;
+}
+
+RC Table::drop_index(int idx) {
+  assert(idx < indexes_.size());
+  string index_name = indexes_[idx]->index_meta().name();
+  // 这里的析构函数会把所有buffer里相关的page都刷下去
+  delete indexes_[idx];
+  indexes_.erase(indexes_.begin() + idx);
+  auto index_file_name = table_index_file(base_dir_.c_str(), name(), index_name.c_str());
+  if (unlink(index_file_name.c_str()) < 0) {
+    LOG_ERROR("failed to remove index file %s while droping index (%s) on table (%s). error=%d:%s",
+              index_file_name.c_str(), index_name.c_str(), name(), errno, strerror(errno));
+    return RC::GENERIC_ERROR;
+  }
+  return RC::SUCCESS;
+}
+
+RC Table::drop_index(const char *index_name) {
+  TableMeta new_table_meta(table_meta());
+  RC rc = new_table_meta.drop_index(index_name);
+  if (rc != RC::SUCCESS) {
+    LOG_ERROR("Failed to drop index (%s) on table(%s). error=%d:%s", index_name, name(), rc, strrc(rc));
+    return rc;
+  }
+  rc = flush_table_meta_file(new_table_meta);
+  if (rc != RC::SUCCESS) {
+    LOG_ERROR("Failed to edit meta file while droping index (%s) on table (%s). error=%d:%s", index_name, name(), rc,
+              strrc(rc));
+    return rc;
+  }
+  for (int i = 0; i < indexes_.size(); i++) {
+    if (strcmp(indexes_[i]->index_meta().name(), index_name) == 0) {
+      return drop_index(i);
+    }
+  }
+  return RC::GENERIC_ERROR;
+}
+
+RC Table::drop_all_indexes() {
+  TableMeta new_table_meta(table_meta());
+  RC rc = RC::SUCCESS;
+  for (int i = static_cast<int>(indexes_.size()) - 1; i >= 0; i--) {
+    rc = new_table_meta.drop_index(indexes_[i]->index_meta().name());
+    if (rc != RC::SUCCESS) {
+      LOG_ERROR("Failed to drop index (%s) on table(%s). error=%d:%s", indexes_[i]->index_meta().name(), name(), rc,
+                strrc(rc));
+      return rc;
+    }
+  }
+  rc = flush_table_meta_file(new_table_meta);
+  if (rc != RC::SUCCESS) {
+    LOG_ERROR("Failed to edit meta file while droping all index on table (%s). error=%d:%s", name(), rc, strrc(rc));
+    return rc;
+  }
+  for (int i = static_cast<int>(indexes_.size()) - 1; i >= 0; i--) {
+    rc = drop_index(i);
+    if (rc != RC::SUCCESS) {
+      LOG_ERROR("Failed to drop index %d while droping all index on table (%s). error=%d:%s", i, name(), rc, strrc(rc));
+      return rc;
+    }
+  }
+  return RC::SUCCESS;
 }
 
 RC Table::delete_record(const Record &record)
@@ -540,4 +573,36 @@ RC Table::sync()
   }
   LOG_INFO("Sync table over. table=%s", name());
   return rc;
+}
+
+RC Table::flush_table_meta_file(TableMeta &new_table_meta) {
+  /// 内存中有一份元数据，磁盘文件也有一份元数据。修改磁盘文件时，先创建一个临时文件，写入完成后再rename为正式文件
+  /// 这样可以防止文件内容不完整
+  // 创建元数据临时文件
+  std::string tmp_file = table_meta_file(base_dir_.c_str(), name()) + ".tmp";
+  std::fstream fs;
+  fs.open(tmp_file, std::ios_base::out | std::ios_base::binary | std::ios_base::trunc);
+  if (!fs.is_open()) {
+    LOG_ERROR("Failed to open file for write. file name=%s, errmsg=%s", tmp_file.c_str(), strerror(errno));
+    return RC::IOERR_OPEN; // 创建索引中途出错，要做还原操作
+  }
+  if (new_table_meta.serialize(fs) < 0) {
+    LOG_ERROR("Failed to dump new table meta to file: %s. sys err=%d:%s", tmp_file.c_str(), errno, strerror(errno));
+    return RC::IOERR_WRITE;
+  }
+  fs.close();
+
+  // 覆盖原始元数据文件
+  std::string meta_file = table_meta_file(base_dir_.c_str(), name());
+  int ret = rename(tmp_file.c_str(), meta_file.c_str());
+  if (ret != 0) {
+    LOG_ERROR("Failed to rename tmp meta file (%s) to normal meta file (%s) while editing meta file on table (%s). "
+              "system error=%d:%s",
+              tmp_file.c_str(), meta_file.c_str(), name(), errno, strerror(errno));
+    return RC::IOERR_WRITE;
+  }
+
+  table_meta().swap(new_table_meta);
+
+  return RC::SUCCESS;
 }

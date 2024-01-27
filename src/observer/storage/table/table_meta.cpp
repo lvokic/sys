@@ -15,10 +15,12 @@ See the Mulan PSL v2 for more details. */
 #include <algorithm>
 #include <common/lang/string.h>
 
-#include "storage/table/table_meta.h"
-#include "json/json.h"
 #include "common/log/log.h"
+#include "sql/parser/value.h"
+#include "storage/field/field.h"
+#include "storage/table/table_meta.h"
 #include "storage/trx/trx.h"
+#include "json/json.h"
 
 using namespace std;
 
@@ -28,19 +30,18 @@ static const Json::StaticString FIELD_FIELDS("fields");
 static const Json::StaticString FIELD_INDEXES("indexes");
 
 TableMeta::TableMeta(const TableMeta &other)
-    : name_(other.name_), fields_(other.fields_), indexes_(other.indexes_), record_size_(other.record_size_)
-{}
+    : name_(other.name_), fields_(other.fields_), indexes_(other.indexes_), record_size_(other.record_size_),
+      table_meta_fields_(other.table_meta_fields_) {}
 
-void TableMeta::swap(TableMeta &other) noexcept
-{
+void TableMeta::swap(TableMeta &other) noexcept {
   name_.swap(other.name_);
   fields_.swap(other.fields_);
   indexes_.swap(other.indexes_);
   std::swap(record_size_, other.record_size_);
+  table_meta_fields_.swap(other.table_meta_fields_);
 }
 
-RC TableMeta::init(int32_t table_id, const char *name, int field_num, const AttrInfoSqlNode attributes[])
-{
+RC TableMeta::init(int32_t table_id, const char *name, int field_num, const AttrInfoSqlNode attributes[]) {
   if (common::is_blank(name)) {
     LOG_ERROR("Name cannot be empty");
     return RC::INVALID_ARGUMENT;
@@ -52,28 +53,36 @@ RC TableMeta::init(int32_t table_id, const char *name, int field_num, const Attr
   }
 
   RC rc = RC::SUCCESS;
-  
+
   int field_offset = 0;
   int trx_field_num = 0;
   const vector<FieldMeta> *trx_fields = TrxKit::instance()->trx_fields();
   if (trx_fields != nullptr) {
-    fields_.resize(field_num + trx_fields->size());
+    fields_.resize(trx_fields->size());
 
     for (size_t i = 0; i < trx_fields->size(); i++) {
       const FieldMeta &field_meta = (*trx_fields)[i];
-      fields_[i] = FieldMeta(field_meta.name(), field_meta.type(), field_offset, field_meta.len(), false/*visible*/);
+      fields_[i] = FieldMeta(field_meta.name(), field_meta.type(), field_offset, field_meta.len(), false /*visible*/,
+                             field_meta.visible(), i);
       field_offset += field_meta.len();
     }
 
     trx_field_num = static_cast<int>(trx_fields->size());
-  } else {
-    fields_.resize(field_num);
   }
+
+  table_meta_fields_.resize(1);
+  table_meta_fields_[0] =
+      FieldMeta("table_meta_null_", INTS, field_offset, attr_type_to_size(INTS), false, false, trx_field_num);
+  field_offset += attr_type_to_size(INTS);
+  int meta_field_num = table_meta_fields_.size();
+  fields_.insert(fields_.end(), table_meta_fields_.begin(), table_meta_fields_.end());
+  fields_.resize(fields_.size() + field_num);
 
   for (int i = 0; i < field_num; i++) {
     const AttrInfoSqlNode &attr_info = attributes[i];
-    rc = fields_[i + trx_field_num].init(attr_info.name.c_str(), 
-            attr_info.type, field_offset, attr_info.length, true/*visible*/);
+    rc = fields_[i + trx_field_num + meta_field_num].init(attr_info.name.c_str(), attr_info.type, field_offset,
+                                                          attr_info.length, true /*visible*/, attr_info.nullable,
+                                                          i + trx_field_num + meta_field_num);
     if (rc != RC::SUCCESS) {
       LOG_ERROR("Failed to init field meta. table name=%s, field name: %s", name, attr_info.name.c_str());
       return rc;
@@ -85,38 +94,36 @@ RC TableMeta::init(int32_t table_id, const char *name, int field_num, const Attr
   record_size_ = field_offset;
 
   table_id_ = table_id;
-  name_     = name;
+  name_ = name;
   LOG_INFO("Sussessfully initialized table meta. table id=%d, name=%s", table_id, name);
   return RC::SUCCESS;
 }
 
-RC TableMeta::add_index(const IndexMeta &index)
-{
+RC TableMeta::add_index(const IndexMeta &index) {
   indexes_.push_back(index);
   return RC::SUCCESS;
 }
 
-const char *TableMeta::name() const
-{
-  return name_.c_str();
+RC TableMeta::drop_index(const char *index_name) {
+  for (int i = 0; i < indexes_.size(); i++) {
+    if (strcmp(indexes_[i].name(), index_name) == 0) {
+      indexes_.erase(indexes_.begin() + i);
+      return RC::SUCCESS;
+    }
+  }
+  return RC::GENERIC_ERROR;
 }
 
-const FieldMeta *TableMeta::trx_field() const
-{
-  return &fields_[0];
+const char *TableMeta::name() const { return name_.c_str(); }
+
+const FieldMeta *TableMeta::trx_field() const { return &fields_[0]; }
+
+const std::pair<const FieldMeta *, int> TableMeta::trx_fields() const {
+  return std::pair<const FieldMeta *, int>{fields_.data(), trx_field_num()};
 }
 
-const std::pair<const FieldMeta *, int> TableMeta::trx_fields() const
-{
-  return std::pair<const FieldMeta *, int>{fields_.data(), sys_field_num()};
-}
-
-const FieldMeta *TableMeta::field(int index) const
-{
-  return &fields_[index];
-}
-const FieldMeta *TableMeta::field(const char *name) const
-{
+const FieldMeta *TableMeta::field(int index) const { return &fields_[index]; }
+const FieldMeta *TableMeta::field(const char *name) const {
   if (nullptr == name) {
     return nullptr;
   }
@@ -128,8 +135,7 @@ const FieldMeta *TableMeta::field(const char *name) const
   return nullptr;
 }
 
-const FieldMeta *TableMeta::find_field_by_offset(int offset) const
-{
+const FieldMeta *TableMeta::find_field_by_offset(int offset) const {
   for (const FieldMeta &field : fields_) {
     if (field.offset() == offset) {
       return &field;
@@ -137,13 +143,9 @@ const FieldMeta *TableMeta::find_field_by_offset(int offset) const
   }
   return nullptr;
 }
-int TableMeta::field_num() const
-{
-  return fields_.size();
-}
+int TableMeta::field_num() const { return fields_.size(); }
 
-int TableMeta::sys_field_num() const
-{
+int TableMeta::trx_field_num() const {
   const vector<FieldMeta> *trx_fields = TrxKit::instance()->trx_fields();
   if (nullptr == trx_fields) {
     return 0;
@@ -151,8 +153,9 @@ int TableMeta::sys_field_num() const
   return static_cast<int>(trx_fields->size());
 }
 
-const IndexMeta *TableMeta::index(const char *name) const
-{
+int TableMeta::sys_field_num() const { return static_cast<int>(trx_field_num() + table_meta_fields_.size()); }
+
+const IndexMeta *TableMeta::index(const char *name) const {
   for (const IndexMeta &index : indexes_) {
     if (0 == strcmp(index.name(), name)) {
       return &index;
@@ -161,36 +164,51 @@ const IndexMeta *TableMeta::index(const char *name) const
   return nullptr;
 }
 
-const IndexMeta *TableMeta::find_index_by_field(const char *field) const
-{
+const IndexMeta *TableMeta::find_index_by_field(const char *field) const {
   for (const IndexMeta &index : indexes_) {
-    if (0 == strcmp(index.field(), field)) {
+    if (0 == strcmp(index.fields()[0].name(), field)) {
       return &index;
     }
   }
   return nullptr;
 }
 
-const IndexMeta *TableMeta::index(int i) const
-{
-  return &indexes_[i];
+const IndexMeta *TableMeta::find_index_by_fields(std::vector<const char *> fields) const {
+  // 找到一个命中字段最多的索引
+  int nmax = 0;
+  const IndexMeta *ret = nullptr;
+  for (const IndexMeta &index : indexes_) {
+    auto &index_fields = index.fields();
+    int cnt = 0;
+    for (auto &field : index_fields) {
+      bool found = false;
+      for (auto f : fields)
+        if (strcmp(field.name(), f) == 0) {
+          found = true;
+        }
+      if (found)
+        cnt++;
+      else
+        break;
+    }
+    if (cnt == index_fields.size()) {
+      if (nmax < cnt)
+        nmax = cnt, ret = &index;
+    }
+  }
+  return ret;
 }
 
-int TableMeta::index_num() const
-{
-  return indexes_.size();
-}
+const IndexMeta *TableMeta::index(int i) const { return &indexes_[i]; }
 
-int TableMeta::record_size() const
-{
-  return record_size_;
-}
+int TableMeta::index_num() const { return indexes_.size(); }
 
-int TableMeta::serialize(std::ostream &ss) const
-{
+int TableMeta::record_size() const { return record_size_; }
+
+int TableMeta::serialize(std::ostream &ss) const {
 
   Json::Value table_value;
-  table_value[FIELD_TABLE_ID]   = table_id_;
+  table_value[FIELD_TABLE_ID] = table_id_;
   table_value[FIELD_TABLE_NAME] = name_;
 
   Json::Value fields_value;
@@ -221,8 +239,7 @@ int TableMeta::serialize(std::ostream &ss) const
   return ret;
 }
 
-int TableMeta::deserialize(std::istream &is)
-{
+int TableMeta::deserialize(std::istream &is) {
   Json::Value table_value;
   Json::CharReaderBuilder builder;
   std::string errors;
@@ -269,6 +286,12 @@ int TableMeta::deserialize(std::istream &is)
     }
   }
 
+  int meta_fields_begin = trx_field_num();
+  int meta_fields_end = meta_fields_begin + 1;
+  for (int i = meta_fields_begin; i < meta_fields_end; i++) {
+    table_meta_fields_.push_back(fields[i]);
+  }
+
   auto comparator = [](const FieldMeta &f1, const FieldMeta &f2) { return f1.offset() < f2.offset(); };
   std::sort(fields.begin(), fields.end(), comparator);
 
@@ -301,16 +324,11 @@ int TableMeta::deserialize(std::istream &is)
   return (int)(is.tellg() - old_pos);
 }
 
-int TableMeta::get_serial_size() const
-{
-  return -1;
-}
+int TableMeta::get_serial_size() const { return -1; }
 
-void TableMeta::to_string(std::string &output) const
-{}
+void TableMeta::to_string(std::string &output) const {}
 
-void TableMeta::desc(std::ostream &os) const
-{
+void TableMeta::desc(std::ostream &os) const {
   os << name_ << '(' << std::endl;
   for (const auto &field : fields_) {
     os << '\t';

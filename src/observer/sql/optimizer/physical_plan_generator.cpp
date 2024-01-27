@@ -12,8 +12,13 @@ See the Mulan PSL v2 for more details. */
 // Created by Wangyunlai on 2022/12/14.
 //
 
+#include <cstring>
+#include <memory>
 #include <utility>
+#include <vector>
 
+#include "common/log/log.h"
+#include "common/rc.h"
 #include "sql/optimizer/physical_plan_generator.h"
 #include "sql/operator/table_get_logical_operator.h"
 #include "sql/operator/table_scan_physical_operator.h"
@@ -26,6 +31,8 @@ See the Mulan PSL v2 for more details. */
 #include "sql/operator/insert_physical_operator.h"
 #include "sql/operator/delete_logical_operator.h"
 #include "sql/operator/delete_physical_operator.h"
+#include "sql/operator/update_logical_operator.h"
+#include "sql/operator/update_physical_operator.h"
 #include "sql/operator/explain_logical_operator.h"
 #include "sql/operator/explain_physical_operator.h"
 #include "sql/operator/join_logical_operator.h"
@@ -64,6 +71,10 @@ RC PhysicalPlanGenerator::create(LogicalOperator &logical_operator, unique_ptr<P
 
     case LogicalOperatorType::DELETE: {
       return create_plan(static_cast<DeleteLogicalOperator &>(logical_operator), oper);
+    } break;
+
+    case LogicalOperatorType::UPDATE: {
+      return create_plan(static_cast<InsertLogicalOperator &>(logical_operator), oper);
     } break;
 
     case LogicalOperatorType::EXPLAIN: {
@@ -189,9 +200,15 @@ RC PhysicalPlanGenerator::create_plan(ProjectLogicalOperator &project_oper, uniq
   }
 
   ProjectPhysicalOperator *project_operator = new ProjectPhysicalOperator;
-  const vector<Field> &project_fields = project_oper.fields();
-  for (const Field &field : project_fields) {
-    project_operator->add_projection(field.table(), field.meta());
+  vector<unique_ptr<Expression>> &expressions = project_oper.expressions();
+  for (auto &expr : expressions) {
+    if (expr->type() == ExprType::FIELD) {
+      Field field = *expr->reference_fields().begin();
+      project_operator->add_projection(field.table(), field.meta());
+    } else {
+      project_operator->add_projection(expr->name().c_str());
+    }
+    project_operator->add_expression(expr);
   }
 
   if (child_phy_oper) {
@@ -207,7 +224,7 @@ RC PhysicalPlanGenerator::create_plan(ProjectLogicalOperator &project_oper, uniq
 RC PhysicalPlanGenerator::create_plan(InsertLogicalOperator &insert_oper, unique_ptr<PhysicalOperator> &oper)
 {
   Table *table = insert_oper.table();
-  vector<Value> &values = insert_oper.values();
+  vector<vector<Value>> &values = insert_oper.values();
   InsertPhysicalOperator *insert_phy_oper = new InsertPhysicalOperator(table, std::move(values));
   oper.reset(insert_phy_oper);
   return RC::SUCCESS;
@@ -292,3 +309,18 @@ RC PhysicalPlanGenerator::create_plan(CalcLogicalOperator &logical_oper, std::un
   return rc;
 }
 
+RC PhysicalPlanGenerator::create_plan(UpdateLogicalOperator &logical_oper, std::unique_ptr<PhysicalOperator> &oper) {
+  UpdatePhysicalOperator *op = new UpdatePhysicalOperator;
+  op->units_.swap(logical_oper.units());
+  op->table_ = logical_oper.table();
+  oper.reset(op);
+  for (auto &child : logical_oper.children()) {
+    std::unique_ptr<PhysicalOperator> cop;
+    RC rc = create(*child, cop);
+    if (rc != RC::SUCCESS) {
+      return rc;
+    }
+    op->add_child(std::move(cop));
+  }
+  return RC::SUCCESS;
+}

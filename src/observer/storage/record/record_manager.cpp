@@ -14,7 +14,6 @@ See the Mulan PSL v2 for more details. */
 #include "storage/record/record_manager.h"
 #include "common/log/log.h"
 #include "common/lang/bitmap.h"
-#include "storage/common/condition_filter.h"
 #include "storage/trx/trx.h"
 
 using namespace common;
@@ -572,11 +571,6 @@ RC RecordFileScanner::fetch_next_record_in_page()
       const auto page_num = record_page_handler_.get_page_num();
       LOG_TRACE("failed to get next record from page. page_num=%d, rc=%s", page_num, strrc(rc));
       return rc;
-    }
-
-    // 如果有过滤条件，就用过滤条件过滤一下
-    if (condition_filter_ != nullptr && !condition_filter_->filter(next_record_)) {
-      continue;
     }
 
     // 如果是某个事务上遍历数据，还要看看事务访问是否有冲突

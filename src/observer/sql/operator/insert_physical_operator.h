@@ -27,14 +27,11 @@ class InsertStmt;
 class InsertPhysicalOperator : public PhysicalOperator
 {
 public:
-  InsertPhysicalOperator(Table *table, std::vector<Value> &&values);
+  InsertPhysicalOperator(Table *table, std::vector<std::vector<Value>> &&values);
 
   virtual ~InsertPhysicalOperator() = default;
 
-  PhysicalOperatorType type() const override
-  {
-    return PhysicalOperatorType::INSERT;
-  }
+  PhysicalOperatorType type() const override { return PhysicalOperatorType::INSERT; }
 
   RC open(Trx *trx) override;
   RC next() override;
@@ -43,6 +40,10 @@ public:
   Tuple *current_tuple() override { return nullptr; }
 
 private:
+  RC insert_all(Trx *trx, std::vector<Record> &inserted);
+
+private:
   Table *table_ = nullptr;
-  std::vector<Value> values_;
+  std::vector<std::vector<Value>> values_;
+  size_t insert_idx = 0;
 };

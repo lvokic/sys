@@ -17,6 +17,7 @@ See the Mulan PSL v2 for more details. */
 #include "sql/stmt/insert_stmt.h"
 #include "sql/stmt/delete_stmt.h"
 #include "sql/stmt/select_stmt.h"
+#include "sql/stmt/update_stmt.h"
 #include "sql/stmt/explain_stmt.h"
 #include "sql/stmt/create_index_stmt.h"
 #include "sql/stmt/create_table_stmt.h"
@@ -37,33 +38,36 @@ RC Stmt::create_stmt(Db *db, ParsedSqlNode &sql_node, Stmt *&stmt)
 
   switch (sql_node.flag) {
     case SCF_INSERT: {
-      return InsertStmt::create(db, sql_node.insertion, stmt);
+      return InsertStmt::create(db, *sql_node.node.insertion, stmt);
     }
     case SCF_DELETE: {
-      return DeleteStmt::create(db, sql_node.deletion, stmt);
+      return DeleteStmt::create(db, *sql_node.node.deletion, stmt);
     }
     case SCF_SELECT: {
-      return SelectStmt::create(db, sql_node.selection, stmt);
+      return SelectStmt::create(db, *sql_node.node.selection, stmt);
+    }
+    case SCF_UPDATE: {
+      return UpdateStmt::create(db, *sql_node.node.update, stmt);
     }
 
     case SCF_EXPLAIN: {
-      return ExplainStmt::create(db, sql_node.explain, stmt);
+      return ExplainStmt::create(db, *sql_node.node.explain, stmt);
     }
 
     case SCF_CREATE_INDEX: {
-      return CreateIndexStmt::create(db, sql_node.create_index, stmt);
+      return CreateIndexStmt::create(db, *sql_node.node.create_index, stmt);
     }
 
     case SCF_CREATE_TABLE: {
-      return CreateTableStmt::create(db, sql_node.create_table, stmt);
-    }
-
-    case SCF_DESC_TABLE: {
-      return DescTableStmt::create(db, sql_node.desc_table, stmt);
+      return CreateTableStmt::create(db, *sql_node.node.create_table, stmt);
     }
 
     case SCF_DROP_TABLE: {
-      return DropTableStmt::create(db, sql_node.drop_table, stmt);
+      return DropTableStmt::create(db, *sql_node.node.drop_table, stmt);
+    }
+
+    case SCF_DESC_TABLE: {
+      return DescTableStmt::create(db, *sql_node.node.desc_table, stmt);
     }
 
     case SCF_HELP: {
@@ -88,15 +92,15 @@ RC Stmt::create_stmt(Db *db, ParsedSqlNode &sql_node, Stmt *&stmt)
     }
 
     case SCF_SET_VARIABLE: {
-      return SetVariableStmt::create(sql_node.set_variable, stmt);
+      return SetVariableStmt::create(*sql_node.node.set_variable, stmt);
     }
 
     case SCF_LOAD_DATA: {
-      return LoadDataStmt::create(db, sql_node.load_data, stmt);
+      return LoadDataStmt::create(db, *sql_node.node.load_data, stmt);
     }
 
     case SCF_CALC: {
-      return CalcStmt::create(sql_node.calc, stmt);
+      return CalcStmt::create(*sql_node.node.calc, stmt);
     }
 
     default: {

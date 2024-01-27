@@ -18,15 +18,15 @@ See the Mulan PSL v2 for more details. */
 #include "sql/executor/execute_stage.h"
 
 #include "common/log/log.h"
-#include "session/session.h"
-#include "event/storage_event.h"
-#include "event/sql_event.h"
 #include "event/session_event.h"
-#include "sql/stmt/stmt.h"
-#include "sql/stmt/select_stmt.h"
-#include "storage/default/default_handler.h"
+#include "event/sql_event.h"
+#include "event/storage_event.h"
+#include "session/session.h"
 #include "sql/executor/command_executor.h"
 #include "sql/operator/calc_physical_operator.h"
+#include "sql/stmt/select_stmt.h"
+#include "sql/stmt/stmt.h"
+#include "storage/default/default_handler.h"
 
 using namespace std;
 using namespace common;
@@ -66,17 +66,11 @@ RC ExecuteStage::handle_request_with_physical_operator(SQLStageEvent *sql_event)
   TupleSchema schema;
   switch (stmt->type()) {
     case StmtType::SELECT: {
-      SelectStmt *select_stmt = static_cast<SelectStmt *>(stmt);
-      bool with_table_name = select_stmt->tables().size() > 1;
+    SelectStmt *select_stmt = static_cast<SelectStmt *>(stmt);
+    bool with_table_name = (select_stmt->current_tables().size() > 1);
 
-      for (const Field &field : select_stmt->query_fields()) {
-        if (with_table_name) {
-          schema.append_cell(field.table_name(), field.field_name());
-        } else {
-          schema.append_cell(field.field_name());
-        }
-      }
-    } break;
+    schema = *select_stmt->schema();
+  } break;
 
     case StmtType::CALC: {
       CalcPhysicalOperator *calc_operator = static_cast<CalcPhysicalOperator *>(physical_operator.get());

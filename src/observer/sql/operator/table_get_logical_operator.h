@@ -21,25 +21,21 @@ See the Mulan PSL v2 for more details. */
  * @details 比如使用全表扫描、通过索引获取数据等
  * @ingroup LogicalOperator
  */
-class TableGetLogicalOperator : public LogicalOperator
-{
+class TableGetLogicalOperator : public LogicalOperator {
 public:
   TableGetLogicalOperator(Table *table, const std::vector<Field> &fields, bool readonly);
   virtual ~TableGetLogicalOperator() = default;
 
-  LogicalOperatorType type() const override
-  {
-    return LogicalOperatorType::TABLE_GET;
-  }
+  LogicalOperatorType type() const override { return LogicalOperatorType::TABLE_GET; }
 
-  Table *table() const  { return table_; }
+  Table *table() const { return table_; }
   bool readonly() const { return readonly_; }
 
   void set_predicates(std::vector<std::unique_ptr<Expression>> &&exprs);
-  std::vector<std::unique_ptr<Expression>> &predicates()
-  {
-    return predicates_;
-  }
+  void add_predicate(std::unique_ptr<Expression> &&expr);
+  std::vector<std::unique_ptr<Expression>> &predicates() { return predicates_; }
+
+  void add_current_table() override { tables_.insert(table_->name()); }
 
 private:
   Table *table_ = nullptr;

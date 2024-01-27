@@ -15,10 +15,14 @@ See the Mulan PSL v2 for more details. */
 #include "sql/operator/table_get_logical_operator.h"
 
 TableGetLogicalOperator::TableGetLogicalOperator(Table *table, const std::vector<Field> &fields, bool readonly)
-    : table_(table), fields_(fields), readonly_(readonly)
-{}
+    : table_(table), fields_(fields), readonly_(readonly) {
+  tables_.insert(table->name());
+}
 
-void TableGetLogicalOperator::set_predicates(std::vector<std::unique_ptr<Expression>> &&exprs)
-{
+void TableGetLogicalOperator::set_predicates(std::vector<std::unique_ptr<Expression>> &&exprs) {
   predicates_ = std::move(exprs);
+}
+
+void TableGetLogicalOperator::add_predicate(std::unique_ptr<Expression> &&expr) {
+  predicates_.push_back(std::move(expr));
 }

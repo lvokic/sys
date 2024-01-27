@@ -23,22 +23,18 @@ See the Mulan PSL v2 for more details. */
  * @brief 插入逻辑算子
  * @ingroup LogicalOperator
  */
-class InsertLogicalOperator : public LogicalOperator
-{
+class InsertLogicalOperator : public LogicalOperator {
 public:
-  InsertLogicalOperator(Table *table, std::vector<Value> values);
+  InsertLogicalOperator(Table *table, std::vector<std::vector<Value>> values);
   virtual ~InsertLogicalOperator() = default;
 
-  LogicalOperatorType type() const override
-  {
-    return LogicalOperatorType::INSERT;
-  }
+  LogicalOperatorType type() const override { return LogicalOperatorType::INSERT; }
 
   Table *table() const { return table_; }
-  const std::vector<Value> &values() const { return values_; }
-  std::vector<Value> &values() { return values_; }
+  const std::vector<std::vector<Value>> &values() const { return values_; }
+  std::vector<std::vector<Value>> &values() { return values_; }
 
 private:
   Table *table_ = nullptr;
-  std::vector<Value> values_;
+  std::vector<std::vector<Value>> values_;
 };

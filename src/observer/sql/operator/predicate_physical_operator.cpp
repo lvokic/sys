@@ -18,13 +18,11 @@ See the Mulan PSL v2 for more details. */
 #include "sql/stmt/filter_stmt.h"
 #include "storage/field/field.h"
 
-PredicatePhysicalOperator::PredicatePhysicalOperator(std::unique_ptr<Expression> expr) : expression_(std::move(expr))
-{
+PredicatePhysicalOperator::PredicatePhysicalOperator(std::unique_ptr<Expression> expr) : expression_(std::move(expr)) {
   ASSERT(expression_->value_type() == BOOLEANS, "predicate's expression should be BOOLEAN type");
 }
 
-RC PredicatePhysicalOperator::open(Trx *trx)
-{
+RC PredicatePhysicalOperator::open(Trx *trx) {
   if (children_.size() != 1) {
     LOG_WARN("predicate operator must has one child");
     return RC::INTERNAL;
@@ -33,8 +31,7 @@ RC PredicatePhysicalOperator::open(Trx *trx)
   return children_[0]->open(trx);
 }
 
-RC PredicatePhysicalOperator::next()
-{
+RC PredicatePhysicalOperator::next() {
   RC rc = RC::SUCCESS;
   PhysicalOperator *oper = children_.front().get();
 

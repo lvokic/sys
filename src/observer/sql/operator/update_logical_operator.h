@@ -9,43 +9,24 @@ MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 See the Mulan PSL v2 for more details. */
 
 //
-// Created by Wangyunlai on 2022/5/22.
+// Created by WangYunlai on 2023/4/25.
 //
 
 #pragma once
 
-#include "common/rc.h"
-#include "sql/expr/expression.h"
-#include "sql/stmt/filter_stmt.h"
-#include "sql/stmt/stmt.h"
+#include "sql/operator/logical_operator.h"
+#include "sql/stmt/update_stmt.h"
 #include "storage/field/field.h"
 
-class Table;
-
-struct UpdateUnit {
-  Field field;
-  std::unique_ptr<Expression> value;
-};
-
-/**
- * @brief 更新语句
- * @ingroup Statement
- */
-class UpdateStmt : public Stmt {
+class UpdateLogicalOperator : public LogicalOperator {
 public:
-  UpdateStmt() = default;
+  LogicalOperatorType type() const { return LogicalOperatorType::UPDATE; }
+  UpdateLogicalOperator(Table *table, std::vector<UpdateUnit> &units) : table_(table), units_(std::move(units)) {}
 
-public:
-  static RC create(Db *db, const UpdateSqlNode &update_sql, Stmt *&stmt);
-  StmtType type() const { return StmtType::UPDATE; }
-
-public:
-  Table *table() const { return table_; }
   std::vector<UpdateUnit> &units() { return units_; }
-  FilterStmt *filter() { return filter_; }
+  Table *table() { return table_; }
 
 private:
-  Table *table_ = nullptr;
   std::vector<UpdateUnit> units_;
-  FilterStmt *filter_;
+  Table *table_;
 };

@@ -14,13 +14,22 @@ See the Mulan PSL v2 for more details. */
 
 #pragma once
 
-#include <string.h>
+#include <functional>
 #include <memory>
+#include <regex>
+#include <string.h>
 #include <string>
+#include <unordered_map>
+#include <utility>
 
-#include "storage/field/field.h"
-#include "sql/parser/value.h"
 #include "common/log/log.h"
+#include "sql/expr/tuple_cell.h"
+#include "sql/parser/parse_defs.h"
+#include "sql/parser/value.h"
+#include "storage/db/db.h"
+#include "storage/field/field.h"
+
+using ExprGenerator = std::function<RC(const ExprSqlNode *, Expression *&)>;
 
 class Tuple;
 
@@ -28,22 +37,6 @@ class Tuple;
  * @defgroup Expression
  * @brief 表达式
  */
-
-/**
- * @brief 表达式类型
- * @ingroup Expression
- */
-enum class ExprType 
-{
-  NONE,
-  STAR,         ///< 星号，表示所有字段
-  FIELD,        ///< 字段。在实际执行时，根据行数据内容提取对应字段的值
-  VALUE,        ///< 常量值
-  CAST,         ///< 需要做类型转换的表达式
-  COMPARISON,   ///< 需要做比较的表达式
-  CONJUNCTION,  ///< 多个表达式使用同一种关系(AND或OR)来联结
-  ARITHMETIC,   ///< 算术运算
-};
 
 /**
  * @brief 表达式的抽象描述
@@ -71,10 +64,7 @@ public:
    * @brief 在没有实际运行的情况下，也就是无法获取tuple的情况下，尝试获取表达式的值
    * @details 有些表达式的值是固定的，比如ValueExpr，这种情况下可以直接获取值
    */
-  virtual RC try_get_value(Value &value) const
-  {
-    return RC::UNIMPLENMENT;
-  }
+  virtual RC try_get_value(Value &value) const { return RC::UNIMPLENMENT; }
 
   /**
    * @brief 表达式的类型
@@ -94,6 +84,13 @@ public:
   virtual std::string name() const { return name_; }
   virtual void set_name(std::string name) { name_ = name; }
 
+  static RC create(Db *db, Table *default_table, std::unordered_map<std::string, Table *> *tables,
+                   const ExprSqlNode *expr_node, Expression *&expr, ExprGenerator *fallback);
+
+  virtual std::set<Field> reference_fields() const = 0;
+
+  virtual std::string to_string() const = 0;
+
 private:
   std::string  name_;
 };
@@ -102,19 +99,20 @@ private:
  * @brief 字段表达式
  * @ingroup Expression
  */
-class FieldExpr : public Expression 
-{
+class FieldExpr : public Expression {
 public:
   FieldExpr() = default;
-  FieldExpr(const Table *table, const FieldMeta *field) : field_(table, field)
-  {}
-  FieldExpr(const Field &field) : field_(field)
-  {}
+  FieldExpr(const Table *table, const FieldMeta *field) : field_(table, field) {
+    spec_ = TupleCellSpec(table_name(), field_name());
+  }
+  FieldExpr(const Field &field) : field_(field) { spec_ = TupleCellSpec(table_name(), field_name()); }
 
   virtual ~FieldExpr() = default;
 
   ExprType type() const override { return ExprType::FIELD; }
   AttrType value_type() const override { return field_.attr_type(); }
+
+  // std::string name() const override;
 
   Field &field() { return field_; }
 
@@ -126,25 +124,36 @@ public:
 
   RC get_value(const Tuple &tuple, Value &value) const override;
 
+  static RC create(Db *db, Table *default_table, std::unordered_map<std::string, Table *> *tables,
+                   const FieldExprSqlNode *field_node, Expression *&expr);
+
+  static RC create(Table *table, const FieldMeta *field, std::string table_name, Expression *&expr);
+
+  virtual std::set<Field> reference_fields() const override;
+
+  virtual std::string to_string() const override { return std::string(table_name()) + "." + field_name(); }
+
 private:
   Field field_;
+  TupleCellSpec spec_;
 };
 
 /**
  * @brief 常量值表达式
  * @ingroup Expression
  */
-class ValueExpr : public Expression 
-{
+class ValueExpr : public Expression {
 public:
   ValueExpr() = default;
-  explicit ValueExpr(const Value &value) : value_(value)
-  {}
+  explicit ValueExpr(const Value &value) : value_(value) {}
 
   virtual ~ValueExpr() = default;
 
   RC get_value(const Tuple &tuple, Value &value) const override;
-  RC try_get_value(Value &value) const override { value = value_; return RC::SUCCESS; }
+  RC try_get_value(Value &value) const override {
+    value = value_;
+    return RC::SUCCESS;
+  }
 
   ExprType type() const override { return ExprType::VALUE; }
 
@@ -154,6 +163,12 @@ public:
 
   const Value &get_value() const { return value_; }
 
+  static RC create(const ValueExprSqlNode *value_node, Expression *&expr);
+
+  std::set<Field> reference_fields() const override;
+
+  virtual std::string to_string() const override { return "Value(" + value_.to_string() + ")"; }
+
 private:
   Value value_;
 };
@@ -162,16 +177,13 @@ private:
  * @brief 类型转换表达式
  * @ingroup Expression
  */
-class CastExpr : public Expression 
-{
+class CastExpr : public Expression {
 public:
   CastExpr(std::unique_ptr<Expression> child, AttrType cast_type);
+  CastExpr(Expression *child, AttrType cast_type);
   virtual ~CastExpr();
 
-  ExprType type() const override
-  {
-    return ExprType::CAST;
-  }
+  ExprType type() const override { return ExprType::CAST; }
   RC get_value(const Tuple &tuple, Value &value) const override;
 
   RC try_get_value(Value &value) const override;
@@ -180,22 +192,28 @@ public:
 
   std::unique_ptr<Expression> &child() { return child_; }
 
+  static RC create(AttrType target_type, Expression *&expr);
+
+  std::set<Field> reference_fields() const override;
+
+  virtual std::string to_string() const override { return child_->to_string(); }
+
 private:
   RC cast(const Value &value, Value &cast_value) const;
 
 private:
-  std::unique_ptr<Expression> child_;  ///< 从这个表达式转换
-  AttrType cast_type_;  ///< 想要转换成这个类型
+  std::unique_ptr<Expression> child_; ///< 从这个表达式转换
+  AttrType cast_type_;                ///< 想要转换成这个类型
 };
 
 /**
  * @brief 比较表达式
  * @ingroup Expression
  */
-class ComparisonExpr : public Expression 
-{
+class ComparisonExpr : public Expression {
 public:
   ComparisonExpr(CompOp comp, std::unique_ptr<Expression> left, std::unique_ptr<Expression> right);
+  ComparisonExpr(CompOp comp, Expression *left, Expression *right);
   virtual ~ComparisonExpr();
 
   ExprType type() const override { return ExprType::COMPARISON; }
@@ -206,7 +224,7 @@ public:
 
   CompOp comp() const { return comp_; }
 
-  std::unique_ptr<Expression> &left()  { return left_;  }
+  std::unique_ptr<Expression> &left() { return left_; }
   std::unique_ptr<Expression> &right() { return right_; }
 
   /**
@@ -220,6 +238,20 @@ public:
    * @param value the result of comparison
    */
   RC compare_value(const Value &left, const Value &right, bool &value) const;
+  static RC create(Db *db, Table *default_table, std::unordered_map<std::string, Table *> *tables,
+                   const ComparisonExprSqlNode *comparison_node, Expression *&expr, ExprGenerator *fallback);
+
+  std::set<Field> reference_fields() const override;
+
+  virtual std::string to_string() const override {
+    std::string ret;
+    if (left_)
+      ret += left_->to_string();
+    ret += " cmpop ";
+    if (right_)
+      ret += right_->to_string();
+    return "(" + ret + ")";
+  }
 
 private:
   CompOp comp_;
@@ -227,22 +259,17 @@ private:
   std::unique_ptr<Expression> right_;
 };
 
+
 /**
  * @brief 联结表达式
  * @ingroup Expression
  * 多个表达式使用同一种关系(AND或OR)来联结
  * 当前miniob仅有AND操作
  */
-class ConjunctionExpr : public Expression 
-{
+class ConjunctionExpr : public Expression {
 public:
-  enum class Type {
-    AND,
-    OR,
-  };
-
-public:
-  ConjunctionExpr(Type type, std::vector<std::unique_ptr<Expression>> &children);
+  ConjunctionExpr(ConjunctionType type, Expression *left, Expression *right);
+  ConjunctionExpr(ConjunctionType type, std::unique_ptr<Expression> left, std::unique_ptr<Expression> right);
   virtual ~ConjunctionExpr() = default;
 
   ExprType type() const override { return ExprType::CONJUNCTION; }
@@ -251,33 +278,39 @@ public:
 
   RC get_value(const Tuple &tuple, Value &value) const override;
 
-  Type conjunction_type() const { return conjunction_type_; }
+  ConjunctionType conjunction_type() const { return conjunction_type_; }
 
-  std::vector<std::unique_ptr<Expression>> &children() { return children_; }
+  std::unique_ptr<Expression> &left() { return left_; }
+  std::unique_ptr<Expression> &right() { return right_; }
+  static RC create(Db *db, Table *default_table, std::unordered_map<std::string, Table *> *tables,
+                   const ConjunctionExprSqlNode *conjunction_node, Expression *&expr, ExprGenerator *fallback);
+
+  std::set<Field> reference_fields() const override;
+
+  virtual std::string to_string() const override {
+    std::string ret;
+    if (left_)
+      ret += left_->to_string();
+    ret += " conjop ";
+    if (right_)
+      ret += right_->to_string();
+    return "(" + ret + ")";
+  }
 
 private:
-  Type conjunction_type_;
-  std::vector<std::unique_ptr<Expression>> children_;
+  ConjunctionType conjunction_type_;
+  std::unique_ptr<Expression> left_;
+  std::unique_ptr<Expression> right_;
 };
 
 /**
  * @brief 算术表达式
  * @ingroup Expression
  */
-class ArithmeticExpr : public Expression 
-{
+class ArithmeticExpr : public Expression {
 public:
-  enum class Type {
-    ADD,
-    SUB,
-    MUL,
-    DIV,
-    NEGATIVE,
-  };
-
-public:
-  ArithmeticExpr(Type type, Expression *left, Expression *right);
-  ArithmeticExpr(Type type, std::unique_ptr<Expression> left, std::unique_ptr<Expression> right);
+  ArithmeticExpr(ArithmeticType type, Expression *left, Expression *right);
+  ArithmeticExpr(ArithmeticType type, std::unique_ptr<Expression> left, std::unique_ptr<Expression> right);
   virtual ~ArithmeticExpr() = default;
 
   ExprType type() const override { return ExprType::ARITHMETIC; }
@@ -287,16 +320,30 @@ public:
   RC get_value(const Tuple &tuple, Value &value) const override;
   RC try_get_value(Value &value) const override;
 
-  Type arithmetic_type() const { return arithmetic_type_; }
+  ArithmeticType arithmetic_type() const { return arithmetic_type_; }
 
   std::unique_ptr<Expression> &left() { return left_; }
   std::unique_ptr<Expression> &right() { return right_; }
+  static RC create(Db *db, Table *default_table, std::unordered_map<std::string, Table *> *tables,
+                   const ArithmeticExprSqlNode *arithmetic_node, Expression *&expr, ExprGenerator *fallback);
+
+  std::set<Field> reference_fields() const override;
+
+  virtual std::string to_string() const override {
+    std::string ret;
+    if (left_)
+      ret += left_->to_string();
+    ret += " arithmetic op ";
+    if (right_)
+      ret += right_->to_string();
+    return "(" + ret + ")";
+  }
 
 private:
   RC calc_value(const Value &left_value, const Value &right_value, Value &value) const;
-  
+
 private:
-  Type arithmetic_type_;
+  ArithmeticType arithmetic_type_;
   std::unique_ptr<Expression> left_;
   std::unique_ptr<Expression> right_;
 };

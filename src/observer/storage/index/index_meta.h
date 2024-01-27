@@ -14,15 +14,17 @@ See the Mulan PSL v2 for more details. */
 
 #pragma once
 
-#include <string>
 #include "common/rc.h"
+#include <string>
+#include <vector>
 
 class TableMeta;
 class FieldMeta;
+class Field;
 
 namespace Json {
 class Value;
-}  // namespace Json
+} // namespace Json
 
 /**
  * @brief 描述一个索引
@@ -30,16 +32,17 @@ class Value;
  * @details 一个索引包含了表的哪些字段，索引的名称等。
  * 如果以后实现了多种类型的索引，还需要记录索引的类型，对应类型的一些元数据等
  */
-class IndexMeta 
-{
+class IndexMeta {
 public:
-  IndexMeta() = default;
+  IndexMeta();
 
-  RC init(const char *name, const FieldMeta &field);
+  RC init(const char *name, const std::vector<FieldMeta> &fields, bool unique);
 
 public:
   const char *name() const;
-  const char *field() const;
+  const std::vector<FieldMeta> &fields() const { return fields_; }
+  const std::string &fields_name() const { return fields_name_; }
+  bool unique() const { return unique_; }
 
   void desc(std::ostream &os) const;
 
@@ -48,6 +51,8 @@ public:
   static RC from_json(const TableMeta &table, const Json::Value &json_value, IndexMeta &index);
 
 protected:
-  std::string name_;   // index's name
-  std::string field_;  // field's name
+  std::string name_; // index's name
+  std::vector<FieldMeta> fields_;
+  std::string fields_name_;
+  bool unique_ = false;
 };

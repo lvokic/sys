@@ -138,14 +138,20 @@ public:
  * @brief 事务接口
  * @ingroup Transaction
  */
-class Trx
-{
+class Trx {
 public:
   Trx() = default;
   virtual ~Trx() = default;
 
   virtual RC insert_record(Table *table, Record &record) = 0;
   virtual RC delete_record(Table *table, Record &record) = 0;
+  virtual RC delete_record(Table *table, const RID &rid) {
+    Record record;
+    RC rc = table->get_record(rid, record);
+    if (rc != RC::SUCCESS)
+      return rc;
+    return delete_record(table, record);
+  }
   virtual RC visit_record(Table *table, Record &record, bool readonly) = 0;
 
   virtual RC start_if_need() = 0;

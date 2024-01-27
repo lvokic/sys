@@ -39,6 +39,7 @@ enum class LogicalOperatorType
   JOIN,       ///< 连接
   INSERT,     ///< 插入
   DELETE,     ///< 删除，删除可能会有子查询
+  UPDATE,     ///< 更新
   EXPLAIN,    ///< 查看执行计划
 };
 
@@ -46,8 +47,7 @@ enum class LogicalOperatorType
  * @brief 逻辑算子描述当前执行计划要做什么
  * @details 可以看OptimizeStage中相关的代码
  */
-class LogicalOperator 
-{
+class LogicalOperator {
 public:
   LogicalOperator() = default;
   virtual ~LogicalOperator();
@@ -55,19 +55,19 @@ public:
   virtual LogicalOperatorType type() const = 0;
 
   void add_child(std::unique_ptr<LogicalOperator> oper);
-  std::vector<std::unique_ptr<LogicalOperator>> &children()
-  {
-    return children_;
-  }
-  std::vector<std::unique_ptr<Expression>> &expressions()
-  {
-    return expressions_;
-  }
+  std::vector<std::unique_ptr<LogicalOperator>> &children() { return children_; }
+  std::vector<std::unique_ptr<Expression>> &expressions() { return expressions_; }
+
+  const std::set<std::string> &tables() const { return tables_; }
+
+  void gen_child_tables();
+  virtual void add_current_table() {}
 
 protected:
-  std::vector<std::unique_ptr<LogicalOperator>> children_;  ///< 子算子
+  std::vector<std::unique_ptr<LogicalOperator>> children_; ///< 子算子
 
   ///< 表达式，比如select中的列，where中的谓词等等，都可以使用表达式来表示
   ///< 表达式能是一个常量，也可以是一个函数，也可以是一个列，也可以是一个子查询等等
-  std::vector<std::unique_ptr<Expression>> expressions_;    
+  std::vector<std::unique_ptr<Expression>> expressions_;
+  std::set<std::string> tables_;
 };
