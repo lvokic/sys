@@ -59,29 +59,20 @@ RC TableScanPhysicalOperator::next()
   return rc;
 }
 
-RC TableScanPhysicalOperator::close()
-{
-  return record_scanner_.close_scan();
-}
+RC TableScanPhysicalOperator::close() { return record_scanner_.close_scan(); }
 
-Tuple *TableScanPhysicalOperator::current_tuple()
-{
+Tuple *TableScanPhysicalOperator::current_tuple() {
   tuple_.set_record(&current_record_);
   return &tuple_;
 }
 
-string TableScanPhysicalOperator::param() const
-{
-  return table_->name();
-}
+string TableScanPhysicalOperator::param() const { return table_->name(); }
 
-void TableScanPhysicalOperator::set_predicates(vector<unique_ptr<Expression>> &&exprs)
-{
+void TableScanPhysicalOperator::set_predicates(vector<unique_ptr<Expression>> &&exprs) {
   predicates_ = std::move(exprs);
 }
 
-RC TableScanPhysicalOperator::filter(RowTuple &tuple, bool &result)
-{
+RC TableScanPhysicalOperator::filter(RowTuple &tuple, bool &result) {
   RC rc = RC::SUCCESS;
   Value value;
   for (unique_ptr<Expression> &expr : predicates_) {

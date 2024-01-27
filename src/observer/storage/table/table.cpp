@@ -320,16 +320,15 @@ RC Table::make_record(int value_num, const Value *values, Record &record)
   memset(record_data, 0, record_size);
 
   for (int i = 0; i < value_num; i++) {
-    const FieldMeta *field = table_meta_.field(i + normal_field_start_index);
+    const FieldMeta *field = table_meta().field(i + normal_field_start_index);
     const Value &value = values[i];
     size_t copy_len = field->len();
     if (field->type() == CHARS) {
-      const size_t data_len = value.length();
-      if (copy_len > data_len) {
-        copy_len = data_len + 1;
-      }
+      copy_len = std::min(value.get_string().length(), copy_len);
+      memcpy(record_data + field->offset(), value.get_string().c_str(), copy_len);
+    } else {
+      memcpy(record_data + field->offset(), value.data(), copy_len);
     }
-    memcpy(record_data + field->offset(), value.data(), copy_len);
   }
 
   record.set_data_owner(record_data, record_size);
@@ -362,7 +361,7 @@ RC Table::init_record_handler(const char *base_dir)
 
 RC Table::get_record_scanner(RecordFileScanner &scanner, Trx *trx, bool readonly)
 {
-  RC rc = scanner.open_scan(this, *data_buffer_pool_, trx, readonly, nullptr);
+  RC rc = scanner.open_scan(this, *data_buffer_pool_, trx, readonly);
   if (rc != RC::SUCCESS) {
     LOG_ERROR("failed to open scanner. rc=%s", strrc(rc));
   }
@@ -551,6 +550,15 @@ Index *Table::find_index_by_field(const char *field_name) const
 {
   const TableMeta &table_meta = this->table_meta();
   const IndexMeta *index_meta = table_meta.find_index_by_field(field_name);
+  if (index_meta != nullptr) {
+    return this->find_index(index_meta->name());
+  }
+  return nullptr;
+}
+
+Index *Table::find_index_by_fields(std::vector<const char *> fields) const {
+  const TableMeta &table_meta = this->table_meta();
+  const IndexMeta *index_meta = table_meta.find_index_by_fields(fields);
   if (index_meta != nullptr) {
     return this->find_index(index_meta->name());
   }

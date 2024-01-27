@@ -122,6 +122,7 @@ private:
 public:
   Index *find_index(const char *index_name) const;
   Index *find_index_by_field(const char *field_name) const;
+  Index *find_index_by_fields(std::vector<const char *> fields) const;
 
 private:
   RC flush_table_meta_file(TableMeta &new_table_meta);

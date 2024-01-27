@@ -337,7 +337,7 @@ public:
    *                         删除时也需要遍历找到数据，然后删除，这时就需要加写锁
    * @param condition_filter 做一些初步过滤操作
    */
-  RC open_scan(Table *table, DiskBufferPool &buffer_pool, Trx *trx, bool readonly, ConditionFilter *condition_filter);
+  RC open_scan(Table *table, DiskBufferPool &buffer_pool, Trx *trx, bool readonly);
 
   /**
    * @brief 关闭一个文件扫描，释放相应的资源
@@ -357,7 +357,7 @@ public:
    * 
    * @details 获取下一条记录之前先调用has_next()判断是否还有数据
    */
-  RC   next(Record &record);
+  RC next(Record &record, bool *locked_ = nullptr);
 
 private:
   /**
