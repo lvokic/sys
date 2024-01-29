@@ -49,8 +49,7 @@ class Tuple;
  * 才能计算出来真实的值。但是有些表达式可能就表示某一个固定的
  * 值，比如ValueExpr。
  */
-class Expression 
-{
+class Expression {
 public:
   Expression() = default;
   virtual ~Expression() = default;
@@ -92,7 +91,7 @@ public:
   virtual std::string to_string() const = 0;
 
 private:
-  std::string  name_;
+  std::string name_;
 };
 
 /**
@@ -131,7 +130,7 @@ public:
 
   virtual std::set<Field> reference_fields() const override;
 
-  virtual std::string to_string() const override { return std::string(table_name()) + "." + field_name(); }
+  virtual std::string to_string() const override { return string(table_name()) + "." + field_name(); }
 
 private:
   Field field_;
@@ -165,7 +164,7 @@ public:
 
   static RC create(const ValueExprSqlNode *value_node, Expression *&expr);
 
-  std::set<Field> reference_fields() const override;
+  set<Field> reference_fields() const override;
 
   virtual std::string to_string() const override { return "Value(" + value_.to_string() + ")"; }
 
@@ -194,7 +193,7 @@ public:
 
   static RC create(AttrType target_type, Expression *&expr);
 
-  std::set<Field> reference_fields() const override;
+  set<Field> reference_fields() const override;
 
   virtual std::string to_string() const override { return child_->to_string(); }
 
@@ -241,10 +240,10 @@ public:
   static RC create(Db *db, Table *default_table, std::unordered_map<std::string, Table *> *tables,
                    const ComparisonExprSqlNode *comparison_node, Expression *&expr, ExprGenerator *fallback);
 
-  std::set<Field> reference_fields() const override;
+  set<Field> reference_fields() const override;
 
   virtual std::string to_string() const override {
-    std::string ret;
+    string ret;
     if (left_)
       ret += left_->to_string();
     ret += " cmpop ";
@@ -258,7 +257,6 @@ private:
   std::unique_ptr<Expression> left_;
   std::unique_ptr<Expression> right_;
 };
-
 
 /**
  * @brief 联结表达式
@@ -285,10 +283,10 @@ public:
   static RC create(Db *db, Table *default_table, std::unordered_map<std::string, Table *> *tables,
                    const ConjunctionExprSqlNode *conjunction_node, Expression *&expr, ExprGenerator *fallback);
 
-  std::set<Field> reference_fields() const override;
+  set<Field> reference_fields() const override;
 
   virtual std::string to_string() const override {
-    std::string ret;
+    string ret;
     if (left_)
       ret += left_->to_string();
     ret += " conjop ";
@@ -301,6 +299,100 @@ private:
   ConjunctionType conjunction_type_;
   std::unique_ptr<Expression> left_;
   std::unique_ptr<Expression> right_;
+};
+
+class ContainExpr : public Expression {
+public:
+  ContainExpr(ContainType type, std::unique_ptr<Expression> left, std::unique_ptr<Expression> right)
+      : contain_type_(type), left_(std::move(left)), right_(std::move(right)) {}
+  RC get_value(const Tuple &tuple, Value &value) const override;
+  ExprType type() const override { return ExprType::CONTAIN; }
+  AttrType value_type() const override { return BOOLEANS; }
+
+  static RC create(Db *db, Table *default_table, std::unordered_map<std::string, Table *> *tables,
+                   const ContainExprSqlNode *expr_node, Expression *&expr, ExprGenerator *fallback);
+
+  virtual std::set<Field> reference_fields() const override;
+
+  virtual std::string to_string() const override;
+
+private:
+  ContainType contain_type_;
+  std::unique_ptr<Expression> left_;
+  std::unique_ptr<Expression> right_;
+};
+
+class ExistsExpr : public Expression {
+public:
+  ExistsExpr(bool exists, std::unique_ptr<Expression> left) : exists_(exists), left_(std::move(left)) {}
+  RC get_value(const Tuple &tuple, Value &value) const override;
+  ExprType type() const override { return ExprType::EXISTS; }
+  AttrType value_type() const override { return BOOLEANS; }
+
+  static RC create(Db *db, Table *default_table, std::unordered_map<std::string, Table *> *tables,
+                   const ExistsExprSqlNode *expr_node, Expression *&expr, ExprGenerator *fallback);
+
+  virtual std::set<Field> reference_fields() const override;
+
+  virtual std::string to_string() const override;
+
+private:
+  bool exists_;
+  std::unique_ptr<Expression> left_;
+};
+
+class NullCheckExpr : public Expression {
+public:
+  NullCheckExpr(bool is_null, std::unique_ptr<Expression> left) : is_null_(is_null), left_(std::move(left)) {}
+  RC get_value(const Tuple &tuple, Value &value) const override;
+  ExprType type() const override { return ExprType::NULL_CHECK; }
+  AttrType value_type() const override { return BOOLEANS; }
+
+  static RC create(Db *db, Table *default_table, std::unordered_map<std::string, Table *> *tables,
+                   const NullCheckExprSqlNode *expr_node, Expression *&expr, ExprGenerator *fallback);
+
+  virtual std::set<Field> reference_fields() const override;
+
+  virtual std::string to_string() const override;
+
+private:
+  bool is_null_;
+  std::unique_ptr<Expression> left_;
+};
+
+class LikeExpr : public Expression {
+public:
+  LikeExpr(bool like, std::unique_ptr<Expression> left, std::string like_s)
+      : like_(like), left_(std::move(left)), like_s_("^" + like_s.substr(1, like_s.size() - 2) + "$") {
+    string pattern;
+    for (auto x : like_s_) {
+      if (x == '_') {
+        pattern += "[^']";
+      } else if (x == '%') {
+        pattern += "[^']*";
+      } else {
+        pattern += x;
+      }
+    }
+    regex_ = std::regex(pattern);
+  }
+
+  RC get_value(const Tuple &tuple, Value &value) const override;
+  ExprType type() const override { return ExprType::LIKE; }
+  AttrType value_type() const override { return BOOLEANS; }
+
+  static RC create(Db *db, Table *default_table, std::unordered_map<std::string, Table *> *tables,
+                   const LikeExprSqlNode *expr_node, Expression *&expr, ExprGenerator *fallback);
+
+  virtual std::set<Field> reference_fields() const override;
+
+  virtual std::string to_string() const override;
+
+private:
+  bool like_;
+  std::unique_ptr<Expression> left_;
+  std::string like_s_;
+  std::regex regex_;
 };
 
 /**
@@ -327,10 +419,10 @@ public:
   static RC create(Db *db, Table *default_table, std::unordered_map<std::string, Table *> *tables,
                    const ArithmeticExprSqlNode *arithmetic_node, Expression *&expr, ExprGenerator *fallback);
 
-  std::set<Field> reference_fields() const override;
+  set<Field> reference_fields() const override;
 
   virtual std::string to_string() const override {
-    std::string ret;
+    string ret;
     if (left_)
       ret += left_->to_string();
     ret += " arithmetic op ";
@@ -346,4 +438,90 @@ private:
   ArithmeticType arithmetic_type_;
   std::unique_ptr<Expression> left_;
   std::unique_ptr<Expression> right_;
+};
+
+/**
+ * @brief 命名表达式
+ * @ingroup Expression
+ */
+class NamedExpr : public Expression {
+public:
+  NamedExpr(AttrType value_type, TupleCellSpec spec, Table *table = nullptr);
+  virtual ~NamedExpr() = default;
+
+  virtual RC get_value(const Tuple &tuple, Value &value) const override;
+  virtual RC try_get_value(Value &value) const override;
+  virtual ExprType type() const override;
+  virtual AttrType value_type() const override;
+  virtual std::set<Field> reference_fields() const override;
+
+  virtual std::string to_string() const override { return name(); }
+
+  Table *table() const { return table_; }
+  TupleCellSpec &spec() { return spec_; }
+  Field &field() { return field_; }
+
+private:
+  AttrType value_type_;
+  TupleCellSpec spec_;
+  Table *table_;
+  Field field_;
+};
+
+class SetExpr : public Expression {
+public:
+  ExprType type() const override { return ExprType::SET; }
+  AttrType value_type() const override { return LISTS; }
+
+  RC get_value(const Tuple &tuple, Value &value) const override;
+
+  static RC create(Db *db, Table *default_table, std::unordered_map<std::string, Table *> *tables,
+                   const SetExprSqlNode *expr_node, Expression *&expr, ExprGenerator *fallback);
+
+  std::set<Field> reference_fields() const override;
+
+  std::string to_string() const override;
+
+private:
+  std::vector<std::unique_ptr<Expression>> children_;
+  ValueListMap values_;
+};
+
+class SelectStmt;
+
+class ListExpr : public NamedExpr {
+public:
+  ListExpr(SelectStmt *select, std::string name);
+
+  ExprType type() const override { return ExprType::LIST; }
+  SelectStmt *get_select() { return select_; }
+  int get_column_num() { return column_num_; }
+
+private:
+  SelectStmt *select_;
+  int column_num_;
+};
+
+class FunctionExpr : public Expression {
+public:
+  FunctionExpr(FunctionType type, std::vector<std::unique_ptr<Expression>> &children);
+  FunctionType function_type() const { return function_type_; }
+  ExprType type() const override { return ExprType::FUNCTION; }
+  RC get_value(const Tuple &tuple, Value &value) const override;
+  RC try_get_value(Value &value) const override;
+  AttrType value_type() const override;
+
+  static RC create(Db *db, Table *default_table, std::unordered_map<std::string, Table *> *tables,
+                   const FunctionExprSqlNode *expr_node, Expression *&expr, ExprGenerator *fallback);
+
+  RC calc_value(Value &out, std::vector<const Value *> &in) const;
+
+  static RC check_function(FunctionType type, std::vector<AttrType> &attrs);
+  std::set<Field> reference_fields() const override;
+
+  virtual std::string to_string() const override { return "func(" + children_[0]->to_string() + ")"; }
+
+private:
+  FunctionType function_type_;
+  std::vector<std::unique_ptr<Expression>> children_;
 };

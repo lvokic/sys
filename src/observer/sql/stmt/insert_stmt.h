@@ -25,15 +25,12 @@ class Db;
  * @brief 插入语句
  * @ingroup Statement
  */
-class InsertStmt : public Stmt 
-{
+class InsertStmt : public Stmt {
 public:
   InsertStmt() = default;
   InsertStmt(Table *table, std::vector<std::vector<Value>> records);
 
-  StmtType type() const override {
-    return StmtType::INSERT;
-  }
+  StmtType type() const override { return StmtType::INSERT; }
 
 public:
   static RC create(Db *db, const InsertSqlNode &insert_sql, Stmt *&stmt);
@@ -43,6 +40,9 @@ public:
   const std::vector<std::vector<Value>> records() const { return records_; }
   int value_amount() const { return value_amount_; }
   int record_amount() const { return record_amount_; }
+
+private:
+  static RC check_record(Db *db, Table *table, std::vector<Value> &record, const std::vector<std::string> &names);
 
 private:
   Table *table_ = nullptr;

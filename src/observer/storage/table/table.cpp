@@ -12,24 +12,29 @@ See the Mulan PSL v2 for more details. */
 // Created by Meiyi & Wangyunlai on 2021/5/13.
 //
 
+#include <algorithm>
+#include <cassert>
 #include <limits.h>
 #include <string.h>
-#include <algorithm>
+#include <unistd.h>
 
 #include "common/defs.h"
+#include "common/lang/string.h"
+#include "common/log/log.h"
+#include "common/rc.h"
+#include "sql/parser/value.h"
+#include "storage/buffer/disk_buffer_pool.h"
+#include "storage/buffer/page.h"
+#include "storage/common/meta_util.h"
+#include "storage/field/field.h"
+#include "storage/index/bplus_tree_index.h"
+#include "storage/index/index.h"
+#include "storage/record/record_manager.h"
 #include "storage/table/table.h"
 #include "storage/table/table_meta.h"
-#include "common/log/log.h"
-#include "common/lang/string.h"
-#include "storage/buffer/disk_buffer_pool.h"
-#include "storage/record/record_manager.h"
-#include "storage/common/meta_util.h"
-#include "storage/index/index.h"
-#include "storage/index/bplus_tree_index.h"
 #include "storage/trx/trx.h"
 
-Table::~Table()
-{
+Table::~Table() {
   if (record_handler_ != nullptr) {
     delete record_handler_;
     record_handler_ = nullptr;
@@ -49,13 +54,8 @@ Table::~Table()
   LOG_INFO("Table has been closed: %s", name());
 }
 
-RC Table::create(int32_t table_id, 
-                 const char *path, 
-                 const char *name, 
-                 const char *base_dir, 
-                 int attribute_count, 
-                 const AttrInfoSqlNode attributes[])
-{
+RC Table::create(int32_t table_id, const char *path, const char *name, const char *base_dir, int attribute_count,
+                 const AttrInfoSqlNode attributes[]) {
 
   if (common::is_blank(name)) {
     LOG_WARN("Name cannot be empty");
@@ -85,9 +85,9 @@ RC Table::create(int32_t table_id,
   close(fd);
 
   // 创建文件
-  if ((rc = table_meta_.init(table_id, name, attribute_count, attributes)) != RC::SUCCESS) {
+  if ((rc = table_meta().init(table_id, name, attribute_count, attributes)) != RC::SUCCESS) {
     LOG_ERROR("Failed to init table meta. name:%s, ret:%d", name, rc);
-    return rc;  // delete table file
+    return rc; // delete table file
   }
 
   std::fstream fs;
@@ -98,7 +98,7 @@ RC Table::create(int32_t table_id,
   }
 
   // 记录元数据到文件中
-  table_meta_.serialize(fs);
+  table_meta().serialize(fs);
   fs.close();
 
   std::string data_file = table_data_file(base_dir, name);
@@ -121,43 +121,7 @@ RC Table::create(int32_t table_id,
   return rc;
 }
 
-RC Table::destroy(const char *dir)
-{
-  RC rc = sync(); //刷新脏页
-  if (rc != RC::SUCCESS) return rc;
-
-  // 删除meta数据
-  std::string path = table_meta_file(dir, name());
-  if (unlink(path.c_str()) != 0) {
-    LOG_ERROR("Failed to remove meta file=%s, errno=%d", path.c_str(), errno);
-    return RC::GENERIC_ERROR;
-  }
-
-  // 删除data数据
-  std::string data_file = table_data_file(dir, name());
-  if (unlink(data_file.c_str()) != 0) {
-    LOG_ERROR("Failed to remove data file=%s, errno=%d", data_file.c_str(), errno);
-    return RC::GENERIC_ERROR;
-  }
-
-  // 删除索引数据
-  const int index_num = table_meta_.index_num();
-  for (int i = 0; i < index_num; i++) {
-    ((BplusTreeIndex *)indexes_[i])->close();
-    const IndexMeta *index_meta = table_meta_.index(i);
-    std::string index_file = table_index_file(dir, name(), index_meta->name());
-    if (unlink(index_file.c_str()) != 0) {
-      LOG_ERROR("Failed to remove index file=%s, errno=%d", index_file.c_str(), errno);
-      return RC::GENERIC_ERROR;
-    }
-  }
-
-  return RC::SUCCESS;
-}
-
-
-RC Table::open(const char *meta_file, const char *base_dir)
-{
+RC Table::open(const char *meta_file, const char *base_dir) {
   // 加载元数据文件
   std::fstream fs;
   std::string meta_file_path = std::string(base_dir) + common::FILE_PATH_SPLIT_STR + meta_file;
@@ -166,7 +130,7 @@ RC Table::open(const char *meta_file, const char *base_dir)
     LOG_ERROR("Failed to open meta file for read. file name=%s, errmsg=%s", meta_file_path.c_str(), strerror(errno));
     return RC::IOERR_OPEN;
   }
-  if (table_meta_.deserialize(fs) < 0) {
+  if (table_meta().deserialize(fs) < 0) {
     LOG_ERROR("Failed to deserialize table meta. file name=%s", meta_file_path.c_str());
     fs.close();
     return RC::INTERNAL;
@@ -204,39 +168,36 @@ RC Table::open(const char *meta_file, const char *base_dir)
   return rc;
 }
 
-RC Table::insert_record(Record &record)
-{
+RC Table::insert_record(Record &record) {
   RC rc = RC::SUCCESS;
-  rc = record_handler_->insert_record(record.data(), table_meta_.record_size(), &record.rid());
+  rc = record_handler_->insert_record(record.data(), table_meta().record_size(), &record.rid());
   if (rc != RC::SUCCESS) {
-    LOG_ERROR("Insert record failed. table name=%s, rc=%s", table_meta_.name(), strrc(rc));
+    LOG_ERROR("Insert record failed. table name=%s, rc=%s", table_meta().name(), strrc(rc));
     return rc;
   }
 
   rc = insert_entry_of_indexes(record.data(), record.rid());
   if (rc != RC::SUCCESS) { // 可能出现了键值重复
-    RC rc2 = delete_entry_of_indexes(record.data(), record.rid(), false/*error_on_not_exists*/);
+    RC rc2 = delete_entry_of_indexes(record.data(), record.rid(), false /*error_on_not_exists*/);
     if (rc2 != RC::SUCCESS) {
-      LOG_ERROR("Failed to rollback index data when insert index entries failed. table name=%s, rc=%d:%s",
-                name(), rc2, strrc(rc2));
+      LOG_ERROR("Failed to rollback index data when insert index entries failed. table name=%s, rc=%d:%s", name(), rc2,
+                strrc(rc2));
     }
     rc2 = record_handler_->delete_record(&record.rid());
     if (rc2 != RC::SUCCESS) {
-      LOG_PANIC("Failed to rollback record data when insert index entries failed. table name=%s, rc=%d:%s",
-                name(), rc2, strrc(rc2));
+      LOG_PANIC("Failed to rollback record data when insert index entries failed. table name=%s, rc=%d:%s", name(), rc2,
+                strrc(rc2));
     }
   }
   return rc;
 }
 
-RC Table::visit_record(const RID &rid, bool readonly, std::function<void(Record &)> visitor)
-{
+RC Table::visit_record(const RID &rid, bool readonly, std::function<void(Record &)> visitor) {
   return record_handler_->visit_record(rid, readonly, visitor);
 }
 
-RC Table::get_record(const RID &rid, Record &record)
-{
-  const int record_size = table_meta_.record_size();
+RC Table::get_record(const RID &rid, Record &record) {
+  const int record_size = table_meta().record_size();
   char *record_data = (char *)malloc(record_size);
   ASSERT(nullptr != record_data, "failed to malloc memory. record data size=%d", record_size);
 
@@ -244,7 +205,7 @@ RC Table::get_record(const RID &rid, Record &record)
     memcpy(record_data, record_src.data(), record_size);
     record.set_rid(record_src.rid());
   };
-  RC rc = record_handler_->visit_record(rid, true/*readonly*/, copier);
+  RC rc = record_handler_->visit_record(rid, true /*readonly*/, copier);
   if (rc != RC::SUCCESS) {
     free(record_data);
     LOG_WARN("failed to visit record. rid=%s, table=%s, rc=%s", rid.to_string().c_str(), name(), strrc(rc));
@@ -255,26 +216,25 @@ RC Table::get_record(const RID &rid, Record &record)
   return rc;
 }
 
-RC Table::recover_insert_record(Record &record)
-{
+RC Table::recover_insert_record(Record &record) {
   RC rc = RC::SUCCESS;
-  rc = record_handler_->recover_insert_record(record.data(), table_meta_.record_size(), record.rid());
+  rc = record_handler_->recover_insert_record(record.data(), table_meta().record_size(), record.rid());
   if (rc != RC::SUCCESS) {
-    LOG_ERROR("Insert record failed. table name=%s, rc=%s", table_meta_.name(), strrc(rc));
+    LOG_ERROR("Insert record failed. table name=%s, rc=%s", table_meta().name(), strrc(rc));
     return rc;
   }
 
   rc = insert_entry_of_indexes(record.data(), record.rid());
   if (rc != RC::SUCCESS) { // 可能出现了键值重复
-    RC rc2 = delete_entry_of_indexes(record.data(), record.rid(), false/*error_on_not_exists*/);
+    RC rc2 = delete_entry_of_indexes(record.data(), record.rid(), false /*error_on_not_exists*/);
     if (rc2 != RC::SUCCESS) {
-      LOG_ERROR("Failed to rollback index data when insert index entries failed. table name=%s, rc=%d:%s",
-                name(), rc2, strrc(rc2));
+      LOG_ERROR("Failed to rollback index data when insert index entries failed. table name=%s, rc=%d:%s", name(), rc2,
+                strrc(rc2));
     }
     rc2 = record_handler_->delete_record(&record.rid());
     if (rc2 != RC::SUCCESS) {
-      LOG_PANIC("Failed to rollback record data when insert index entries failed. table name=%s, rc=%d:%s",
-                name(), rc2, strrc(rc2));
+      LOG_PANIC("Failed to rollback record data when insert index entries failed. table name=%s, rc=%d:%s", name(), rc2,
+                strrc(rc2));
     }
   }
   return rc;
@@ -293,17 +253,17 @@ RC Table::make_record(char *data, int len, Record &record) {
   return RC::SUCCESS;
 }
 
-RC Table::make_record(int value_num, const Value *values, Record &record)
-{
+RC Table::make_record(int value_num, const Value *values, Record &record) {
   // 检查字段类型是否一致
-  if (value_num + table_meta_.sys_field_num() != table_meta_.field_num()) {
-    LOG_WARN("Input values don't match the table's schema, table name:%s", table_meta_.name());
+  if (value_num + table_meta().sys_field_num() != table_meta().field_num()) {
+    LOG_WARN("Input values don't match the table's schema, table name:%s", table_meta().name());
     return RC::SCHEMA_FIELD_MISSING;
   }
 
-  const int normal_field_start_index = table_meta_.sys_field_num();
+  const int normal_field_start_index = table_meta().sys_field_num();
+  RC rc = RC::SUCCESS;
   for (int i = 0; i < value_num; i++) {
-    const FieldMeta *field = table_meta_.field(i + normal_field_start_index);
+    const FieldMeta *field = table_meta().field(i + normal_field_start_index);
     Value &value = const_cast<Value &>(values[i]);
     if (field->type() != value.attr_type()) {
       if (!Value::convert(value.attr_type(), field->type(), value)) {
@@ -312,10 +272,16 @@ RC Table::make_record(int value_num, const Value *values, Record &record)
         return RC::SCHEMA_FIELD_TYPE_MISMATCH;
       }
     }
+    // 对于超过长度的字符串报错
+    if (field->type() == CHARS) {
+      if (value.length() > field->len()) {
+        return RC::INVALID_ARGUMENT;
+      }
+    }
   }
 
   // 复制所有字段的值
-  int record_size = table_meta_.record_size();
+  int record_size = table_meta().record_size();
   char *record_data = (char *)malloc(record_size);
   memset(record_data, 0, record_size);
 
@@ -323,7 +289,11 @@ RC Table::make_record(int value_num, const Value *values, Record &record)
     const FieldMeta *field = table_meta().field(i + normal_field_start_index);
     const Value &value = values[i];
     size_t copy_len = field->len();
-    if (field->type() == CHARS) {
+    if (value.attr_type() == NULLS) {
+      int null_offset = table_meta().null_field_meta()->offset();
+      int &null_value = *(int *)(record_data + null_offset);
+      null_value |= 1 << (field->index());
+    } else if (field->type() == CHARS) {
       copy_len = std::min(value.get_string().length(), copy_len);
       memcpy(record_data + field->offset(), value.get_string().c_str(), copy_len);
     } else {
@@ -335,9 +305,8 @@ RC Table::make_record(int value_num, const Value *values, Record &record)
   return RC::SUCCESS;
 }
 
-RC Table::init_record_handler(const char *base_dir)
-{
-  std::string data_file = table_data_file(base_dir, table_meta_.name());
+RC Table::init_record_handler(const char *base_dir) {
+  std::string data_file = table_data_file(base_dir, table_meta().name());
 
   RC rc = BufferPoolManager::instance().open_file(data_file.c_str(), data_buffer_pool_);
   if (rc != RC::SUCCESS) {
@@ -359,8 +328,7 @@ RC Table::init_record_handler(const char *base_dir)
   return rc;
 }
 
-RC Table::get_record_scanner(RecordFileScanner &scanner, Trx *trx, bool readonly)
-{
+RC Table::get_record_scanner(RecordFileScanner &scanner, Trx *trx, bool readonly) {
   RC rc = scanner.open_scan(this, *data_buffer_pool_, trx, readonly);
   if (rc != RC::SUCCESS) {
     LOG_ERROR("failed to open scanner. rc=%s", strrc(rc));
@@ -375,6 +343,7 @@ RC Table::create_index(Trx *trx, const std::vector<FieldMeta> &field_meta, const
   }
 
   auto real_meta = field_meta;
+  real_meta.insert(real_meta.begin(), *table_meta().null_field_meta());
 
   IndexMeta new_index_meta;
   RC rc = new_index_meta.init(index_name, real_meta, unique);
@@ -498,21 +467,27 @@ RC Table::drop_all_indexes() {
   return RC::SUCCESS;
 }
 
-RC Table::delete_record(const Record &record)
-{
+RC Table::delete_record(const RID &rid) {
+  RC rc = RC::SUCCESS;
+  RC rc1 = RC::SUCCESS;
+  rc1 = visit_record(rid, false, [&](Record &record) { rc = delete_record(record); });
+  if (rc1 != RC::SUCCESS)
+    return rc1;
+  return rc;
+}
+
+RC Table::delete_record(const Record &record) {
   RC rc = RC::SUCCESS;
   for (Index *index : indexes_) {
     rc = index->delete_entry(record.data(), &record.rid());
-    ASSERT(RC::SUCCESS == rc, 
-           "failed to delete entry from index. table name=%s, index name=%s, rid=%s, rc=%s",
-           name(), index->index_meta().name(), record.rid().to_string().c_str(), strrc(rc));
+    ASSERT(RC::SUCCESS == rc, "failed to delete entry from index. table name=%s, index name=%s, rid=%s, rc=%s", name(),
+           index->index_meta().name(), record.rid().to_string().c_str(), strrc(rc));
   }
   rc = record_handler_->delete_record(&record.rid());
   return rc;
 }
 
-RC Table::insert_entry_of_indexes(const char *record, const RID &rid)
-{
+RC Table::insert_entry_of_indexes(const char *record, const RID &rid) {
   RC rc = RC::SUCCESS;
   for (Index *index : indexes_) {
     rc = index->insert_entry(record, &rid);
@@ -523,12 +498,16 @@ RC Table::insert_entry_of_indexes(const char *record, const RID &rid)
   return rc;
 }
 
-RC Table::delete_entry_of_indexes(const char *record, const RID &rid, bool error_on_not_exists)
-{
+RC Table::delete_entry_of_indexes(const char *record, const RID &rid, bool error_on_not_exists) {
   RC rc = RC::SUCCESS;
   for (Index *index : indexes_) {
     rc = index->delete_entry(record, &rid);
     if (rc != RC::SUCCESS) {
+      if (rc == RC::RECORD_NOT_EXIST) {
+        if (error_on_not_exists)
+          return rc;
+        return RC::SUCCESS;
+      }
       if (rc != RC::RECORD_INVALID_KEY || !error_on_not_exists) {
         break;
       }
@@ -537,8 +516,7 @@ RC Table::delete_entry_of_indexes(const char *record, const RID &rid, bool error
   return rc;
 }
 
-Index *Table::find_index(const char *index_name) const
-{
+Index *Table::find_index(const char *index_name) const {
   for (Index *index : indexes_) {
     if (0 == strcmp(index->index_meta().name(), index_name)) {
       return index;
@@ -546,8 +524,8 @@ Index *Table::find_index(const char *index_name) const
   }
   return nullptr;
 }
-Index *Table::find_index_by_field(const char *field_name) const
-{
+
+Index *Table::find_index_by_field(const char *field_name) const {
   const TableMeta &table_meta = this->table_meta();
   const IndexMeta *index_meta = table_meta.find_index_by_field(field_name);
   if (index_meta != nullptr) {
@@ -565,17 +543,13 @@ Index *Table::find_index_by_fields(std::vector<const char *> fields) const {
   return nullptr;
 }
 
-RC Table::sync()
-{
+RC Table::sync() {
   RC rc = RC::SUCCESS;
   for (Index *index : indexes_) {
     rc = index->sync();
     if (rc != RC::SUCCESS) {
-      LOG_ERROR("Failed to flush index's pages. table=%s, index=%s, rc=%d:%s",
-          name(),
-          index->index_meta().name(),
-          rc,
-          strrc(rc));
+      LOG_ERROR("Failed to flush index's pages. table=%s, index=%s, rc=%d:%s", name(), index->index_meta().name(), rc,
+                strrc(rc));
       return rc;
     }
   }
