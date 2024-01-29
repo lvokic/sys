@@ -50,7 +50,7 @@ jobs:
       uses: actions/checkout@v2
 
     - name: Install Libevent
-      run: brew install libevent
+      run: conda deactivate
         
     - name: Build
       shell: bash
