@@ -22,7 +22,6 @@ See the Mulan PSL v2 for more details. */
 #include <functional>
 #include <memory>
 
-#include "sql/parser/date.h"
 #include "storage/record/record_manager.h"
 #include "storage/buffer/disk_buffer_pool.h"
 #include "storage/trx/latch_memo.h"
@@ -67,7 +66,8 @@ public:
   int operator()(const char *v1, const char *v2) const
   {
     switch (attr_type_) {
-      case INTS: {
+      case INTS: 
+      case DATES: {
         return common::compare_int((void *)v1, (void *)v2);
       } break;
       case FLOATS: {
@@ -75,9 +75,6 @@ public:
       }
       case CHARS: {
         return common::compare_string((void *)v1, attr_length_, (void *)v2, attr_length_);
-      }
-      case DATES: {
-        return Date::compare_date((const Date *)v1, (const Date *)v2);
       }
       default: {
         ASSERT(false, "unknown attr type. %d", attr_type_);
@@ -147,6 +144,9 @@ public:
   {
     switch (attr_type_) {
       case INTS: {
+        return std::to_string(*(int *)v);
+      } break;
+      case DATES : {
         return std::to_string(*(int *)v);
       } break;
       case FLOATS: {

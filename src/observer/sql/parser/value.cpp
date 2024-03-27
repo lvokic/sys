@@ -18,12 +18,13 @@ See the Mulan PSL v2 for more details. */
 #include "common/log/log.h"
 #include "common/lang/comparator.h"
 #include "common/lang/string.h"
+#include "common/time/date.h"
 
-const char *ATTR_TYPE_NAME[] = {"undefined", "chars", "ints", "floats", "booleans", "dates"};
+const char *ATTR_TYPE_NAME[] = {"undefined", "chars", "ints", "floats", "dates","booleans"};
 
 const char *attr_type_to_string(AttrType type)
 {
-  if (type >= UNDEFINED && type <= FLOATS) {
+  if (type >= UNDEFINED && type <= DATES) {
     return ATTR_TYPE_NAME[type];
   }
   return "unknown";
@@ -38,15 +39,25 @@ AttrType attr_type_from_string(const char *s)
   return UNDEFINED;
 }
 
-Value::Value(int val){ set_int(val); }
+Value::Value(int val)
+{
+  set_int(val);
+}
 
-Value::Value(float val){ set_float(val); }
+Value::Value(float val)
+{
+  set_float(val);
+}
 
-Value::Value(bool val){ set_boolean(val); }
+Value::Value(bool val)
+{
+  set_boolean(val);
+}
 
-Value::Value(const char *s, int len /*= 0*/){ set_string(s, len); }
-
-Value::Value(Date date) { set_date(date); }
+Value::Value(const char *s, int len /*= 0*/)
+{
+  set_string(s, len);
+}
 
 void Value::set_data(char *data, int length)
 {
@@ -66,8 +77,8 @@ void Value::set_data(char *data, int length)
       num_value_.bool_value_ = *(int *)data != 0;
       length_ = length;
     } break;
-    case DATES: {
-      num_value_.date_value_ = *(Date *)data;
+    case DATES:{
+      num_value_.int_value_ = *(int *)data;
       length_ = length;
     } break;
     default: {
@@ -75,26 +86,34 @@ void Value::set_data(char *data, int length)
     } break;
   }
 }
-
-void Value::set_int(int val) {
+void Value::set_int(int val)
+{
   attr_type_ = INTS;
   num_value_.int_value_ = val;
   length_ = sizeof(val);
 }
 
-void Value::set_float(float val) {
+void Value::set_date(int val)
+{
+  attr_type_ = DATES;
+  num_value_.int_value_ = val;
+  length_ = sizeof(val);
+}
+
+void Value::set_float(float val)
+{
   attr_type_ = FLOATS;
   num_value_.float_value_ = val;
   length_ = sizeof(val);
 }
-
-void Value::set_boolean(bool val) {
+void Value::set_boolean(bool val)
+{
   attr_type_ = BOOLEANS;
   num_value_.bool_value_ = val;
   length_ = sizeof(val);
 }
-
-void Value::set_string(const char *s, int len /*= 0*/) {
+void Value::set_string(const char *s, int len /*= 0*/)
+{
   attr_type_ = CHARS;
   if (len > 0) {
     len = strnlen(s, len);
@@ -105,17 +124,14 @@ void Value::set_string(const char *s, int len /*= 0*/) {
   length_ = str_value_.length();
 }
 
-void Value::set_date(Date date) {
-  attr_type_ = DATES;
-  num_value_.date_value_ = date;
-  length_ = sizeof(date);
-}
-
 void Value::set_value(const Value &value)
 {
   switch (value.attr_type_) {
     case INTS: {
       set_int(value.get_int());
+    } break;
+    case DATES: {
+      set_date(value.get_int());
     } break;
     case FLOATS: {
       set_float(value.get_float());
@@ -125,9 +141,6 @@ void Value::set_value(const Value &value)
     } break;
     case BOOLEANS: {
       set_boolean(value.get_boolean());
-    } break;
-    case DATES: {
-      set_date(value.get_date());
     } break;
     case UNDEFINED: {
       ASSERT(false, "got an invalid value type");
@@ -163,8 +176,8 @@ std::string Value::to_string() const
     case CHARS: {
       os << str_value_;
     } break;
-    case DATES: {
-      os << Date::to_string(num_value_.date_value_);
+    case DATES:{
+      os << date_to_string(num_value_.int_value_);
     } break;
     default: {
       LOG_WARN("unsupported attr type: %d", attr_type_);
@@ -180,6 +193,9 @@ int Value::compare(const Value &other) const
       case INTS: {
         return common::compare_int((void *)&this->num_value_.int_value_, (void *)&other.num_value_.int_value_);
       } break;
+      case DATES: {
+        return common::compare_int((void *)&this->num_value_.int_value_, (void *)&other.num_value_.int_value_);
+      } break;
       case FLOATS: {
         return common::compare_float((void *)&this->num_value_.float_value_, (void *)&other.num_value_.float_value_);
       } break;
@@ -191,10 +207,7 @@ int Value::compare(const Value &other) const
       } break;
       case BOOLEANS: {
         return common::compare_int((void *)&this->num_value_.bool_value_, (void *)&other.num_value_.bool_value_);
-      } break;
-      case DATES: {
-        return Date::compare_date(&num_value_.date_value_, &other.num_value_.date_value_);
-      } break;
+      }
       default: {
         LOG_WARN("unsupported type: %d", this->attr_type_);
       }
@@ -212,6 +225,7 @@ int Value::compare(const Value &other) const
 
 int Value::get_int() const
 {
+  ASSERT(attr_type_ != DATES,"date can not get_int()");
   switch (attr_type_) {
     case CHARS: {
       try {
@@ -240,6 +254,7 @@ int Value::get_int() const
 
 float Value::get_float() const
 {
+  ASSERT(attr_type_ != DATES,"date can not get_float()");
   switch (attr_type_) {
     case CHARS: {
       try {
@@ -273,6 +288,7 @@ std::string Value::get_string() const
 
 bool Value::get_boolean() const
 {
+  ASSERT(attr_type_ != DATES,"date can not get_boolean()");
   switch (attr_type_) {
     case CHARS: {
       try {
@@ -308,42 +324,4 @@ bool Value::get_boolean() const
     }
   }
   return false;
-}
-
-bool Value::convert(AttrType from, AttrType to, Value &value) {
-  if (from == to) {
-    return true;
-  }
-  if (from == CHARS) {
-    if (to == DATES) {
-      Date date = value.get_date();
-      if (date == INVALID_DATE) return false;
-      value.set_date(date);
-      return true;
-    } else if (to == INTS) {
-      value.set_int(value.get_int());
-      return true;
-    } else if (to == FLOATS) {
-      value.set_float(value.get_float());
-      return true;
-    }
-  }
-  if (from == INTS && to == FLOATS) {
-    value.set_float(value.get_float());
-    return true;
-  }
-  if (from == FLOATS && to == INTS) {
-    value.set_int(value.get_int());
-    return true;
-  }
-  return false;
-}
-
-Date Value::get_date() const {
-  switch (attr_type())
-  {
-  case DATES: return num_value_.date_value_;
-  case CHARS: return Date(str_value_);
-  default: return INVALID_DATE;
-  }
 }

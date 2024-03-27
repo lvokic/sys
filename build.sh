@@ -31,8 +31,8 @@ function usage
   echo "# Init."
   echo "./build.sh init"
   echo ""
-  echo "# Build by debug mode and make with -j24."
-  echo "./build.sh debug --make -j24"
+  echo "# Build by release mode and make with -8."
+  echo "./build.sh release --make -j8"
 }
 
 function parse_args
@@ -141,10 +141,10 @@ function build
   set -- "${BUILD_ARGS[@]}"
   case "x$1" in
     xrelease)
-      do_build "$@" -DCMAKE_BUILD_TYPE=RelWithDebInfo -DDEBUG=OFF
+      do_build "$@" -DCMAKE_BUILD_TYPE=RelWithDebInfo -DDEBUG=ON
       ;;
     xdebug)
-      do_build "$@" -DCMAKE_BUILD_TYPE=Debug -DDEBUG=ON
+      do_build "$@" -DCMAKE_BUILD_TYPE=Debug -DDEBUG=OFF
       ;;
     *)
       BUILD_ARGS=(debug "${BUILD_ARGS[@]}")
