@@ -34,6 +34,7 @@ struct UpdateUnit {
 class UpdateStmt : public Stmt {
 public:
   UpdateStmt() = default;
+  ~UpdateStmt() override;
 
 public:
   static RC create(Db *db, const UpdateSqlNode &update_sql, Stmt *&stmt);

@@ -61,7 +61,8 @@ RC insert_record_from_file(Table *table, std::vector<std::string> &file_values, 
     }
 
     switch (field->type()) {
-    case INTS: {
+    case INTS: 
+    case DATES: {
       deserialize_stream.clear(); // 清理stream的状态，防止多次解析出现异常
       deserialize_stream.str(file_value);
 
