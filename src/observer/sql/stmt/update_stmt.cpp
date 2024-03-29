@@ -16,7 +16,7 @@ See the Mulan PSL v2 for more details. */
 #include "common/log/log.h"
 #include "storage/db/db.h"
 #include "storage/table/table.h"
-UpdateStmt::UpdateStmt(Table *table, Value *values, int value_amount,FieldMeta field,FilterStmt * filter_stmt)
+UpdateStmt::UpdateStmt(Table *table, const Value *values, int value_amount,FieldMeta field,FilterStmt * filter_stmt)
     : table_(table), values_(values), value_amount_(value_amount),filter_stmt_(filter_stmt)
 {
   fields_.push_back(field);
