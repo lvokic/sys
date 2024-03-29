@@ -88,7 +88,8 @@ RC Db::create_table(const char *table_name, int attribute_count, const AttrInfoS
   // 文件路径可以移到Table模块
   std::string table_file_path = table_meta_file(path_.c_str(), table_name);
   Table *table = new Table();
-  rc = table->create(next_table_id_++, table_file_path.c_str(), table_name, path_.c_str(), attribute_count, attributes);
+  int32_t table_id = next_table_id_++;
+  rc = table->create(table_id, table_file_path.c_str(), table_name, path_.c_str(), attribute_count, attributes);
   if (rc != RC::SUCCESS) {
     LOG_ERROR("Failed to create table %s.", table_name);
     delete table;
@@ -96,7 +97,7 @@ RC Db::create_table(const char *table_name, int attribute_count, const AttrInfoS
   }
 
   opened_tables_[table_name] = table;
-  LOG_INFO("Create table success. table name=%s", table_name);
+  LOG_INFO("Create table success. table name=%s, table_id:%d", table_name, table_id);
   return RC::SUCCESS;
 }
 
@@ -141,13 +142,12 @@ RC Db::open_all_tables()
     if (opened_tables_.count(table->name()) != 0) {
       delete table;
       LOG_ERROR("Duplicate table with difference file name. table=%s, the other filename=%s",
-          table->name(),
-          filename.c_str());
+          table->name(), filename.c_str());
       return RC::INTERNAL;
     }
 
     if (table->table_id() >= next_table_id_) {
-      next_table_id_ = table->table_id();
+      next_table_id_ = table->table_id() + 1;
     }
     opened_tables_[table->name()] = table;
     LOG_INFO("Open table: %s, file: %s", table->name(), filename.c_str());
@@ -193,4 +193,32 @@ RC Db::recover()
 CLogManager *Db::clog_manager()
 {
   return clog_manager_.get();
+}
+
+/// @brief 去掉delete table之后没有出现访问异常
+RC Db::drop_table(const char *table_name)
+{
+    RC rc = RC::SUCCESS;
+    Table * table = nullptr;
+    auto it = opened_tables_.find(table_name);
+    if(it == opened_tables_.end())
+    {
+      LOG_WARN("table : %s not exist", table_name);
+      rc = RC::SCHEMA_TABLE_NOT_EXIST;
+    }
+    else if( (table = it->second) == nullptr)
+    {
+      LOG_WARN("table : %s not exist", table_name);
+      rc = RC::SCHEMA_TABLE_NOT_EXIST;
+    }
+    else if((rc = table->drop(path_.c_str())) != RC::SUCCESS)
+    {
+      LOG_WARN("table drop file,errno: %s", strrc(rc));
+    }
+    else
+    {
+      opened_tables_.erase(it);
+      delete table;
+    }
+    return rc;
 }
