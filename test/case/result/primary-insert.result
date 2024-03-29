@@ -2,6 +2,13 @@ INITIALIZATION
 CREATE TABLE insert_table(id int, t_name char, col1 int, col2 int);
 SUCCESS
 
+INSERT INTO insert_table VALUES('abcde');
+INSERT INTO insert_table VALUES(';mksamd');
+INSERT INTO insert_table VALUES('abcjwndakde');
+INSERT INTO insert_table VALUES('wdaskdjk');
+INSERT INTO insert_table VALUES('aedawsd');
+INSERT INTO insert_table VALUES('jknl;a');
+
 1. INSERT
 INSERT INTO insert_table VALUES (1,'N1',1,1);
 SUCCESS

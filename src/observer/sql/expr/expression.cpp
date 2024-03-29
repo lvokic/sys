@@ -15,6 +15,8 @@ See the Mulan PSL v2 for more details. */
 #include "sql/expr/expression.h"
 #include "sql/expr/tuple.h"
 
+#include <regex>
+#include <string>
 using namespace std;
 
 RC FieldExpr::get_value(const Tuple &tuple, Value &value) const
@@ -78,6 +80,29 @@ RC CastExpr::try_get_value(Value &value) const
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+/// @brief 将str中所有 from 替换为 to
+static void replace_all(std::string &str, const std::string &from, const std::string &to) 
+{
+  if (from.empty()) {
+    return;
+  }
+  size_t pos = 0;
+  while (std::string::npos != (pos = str.find(from, pos))) {
+    str.replace(pos, from.length(), to);
+    pos += to.length(); // in case "to" contains "from"
+  }
+}
+
+/// @brief [^'] 用于匹配单个字符，[^']* 用于匹配多个字符，将字符串中的 _ 和 % 替换为对应的正则表达式
+static bool str_like(const Value &left, const Value &right) 
+{
+  std::string raw_reg(right.data());
+  replace_all(raw_reg, "_", "[^']");
+  replace_all(raw_reg, "%", "[^']*");
+  std::regex reg(raw_reg.c_str(), std::regex_constants::ECMAScript | std::regex_constants::icase);
+  bool res = std::regex_match(left.data(), reg);
+  return res;
+}
 
 ComparisonExpr::ComparisonExpr(CompOp comp, unique_ptr<Expression> left, unique_ptr<Expression> right)
     : comp_(comp), left_(std::move(left)), right_(std::move(right))
@@ -90,6 +115,9 @@ RC ComparisonExpr::compare_value(const Value &left, const Value &right, bool &re
 {
   RC rc = RC::SUCCESS;
   int cmp_result = left.compare(right);
+  if (comp_ != LIKE_OP && comp_ != NOT_LIKE_OP) {
+    cmp_result = left.compare(right);
+  }
   result = false;
   switch (comp_) {
     case EQUAL_TO: {
@@ -109,6 +137,12 @@ RC ComparisonExpr::compare_value(const Value &left, const Value &right, bool &re
     } break;
     case GREAT_THAN: {
       result = (cmp_result > 0);
+    } break;
+    case LIKE_OP: {
+      result = str_like(left, right);
+    } break;
+    case NOT_LIKE_OP: {
+      result = !str_like(left, right);
     } break;
     default: {
       LOG_WARN("unsupported comparison. %d", comp_);
