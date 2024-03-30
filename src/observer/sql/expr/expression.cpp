@@ -14,7 +14,6 @@ See the Mulan PSL v2 for more details. */
 
 #include "sql/expr/expression.h"
 #include "sql/expr/tuple.h"
-
 #include <regex>
 #include <string>
 using namespace std;
@@ -80,8 +79,7 @@ RC CastExpr::try_get_value(Value &value) const
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-/// @brief 将str中所有 from 替换为 to
-static void replace_all(std::string &str, const std::string &from, const std::string &to) 
+static void replace_all(std::string &str, const std::string &from, const std::string &to)
 {
   if (from.empty()) {
     return;
@@ -89,12 +87,10 @@ static void replace_all(std::string &str, const std::string &from, const std::st
   size_t pos = 0;
   while (std::string::npos != (pos = str.find(from, pos))) {
     str.replace(pos, from.length(), to);
-    pos += to.length(); // in case "to" contains "from"
+    pos += to.length();  // in case 'to' contains 'from'
   }
 }
-
-/// @brief [^'] 用于匹配单个字符，[^']* 用于匹配多个字符，将字符串中的 _ 和 % 替换为对应的正则表达式
-static bool str_like(const Value &left, const Value &right) 
+static bool str_like(const Value &left, const Value &right)
 {
   std::string raw_reg(right.data());
   replace_all(raw_reg, "_", "[^']");
@@ -114,10 +110,26 @@ ComparisonExpr::~ComparisonExpr()
 RC ComparisonExpr::compare_value(const Value &left, const Value &right, bool &result) const
 {
   RC rc = RC::SUCCESS;
-  int cmp_result = left.compare(right);
-  if (comp_ != LIKE_OP && comp_ != NOT_LIKE_OP) {
-    cmp_result = left.compare(right);
+
+  if (comp_ == IS_NULL || comp_ == IS_NOT_NULL) {
+    ASSERT(right.is_null(), "IS_[NOT_]NULL rhs NOT NULL!");
+    result = comp_ == IS_NULL ? left.is_null() : !left.is_null();
+    return rc;
   }
+
+  // check null firstly. don't care comp_
+  if (left.is_null() || right.is_null()) {
+    result = false;
+    return rc;
+  }
+
+  if (comp_ == LIKE_OP || comp_ == NOT_LIKE_OP) {
+    ASSERT(left.is_string() && right.is_string(), "[NOT_]LIKE_OP lhs or rhs NOT STRING!");
+    result = comp_ == LIKE_OP ? str_like(left, right) : !str_like(left, right);
+    return rc;
+  }
+
+  int cmp_result = left.compare(right);
   result = false;
   switch (comp_) {
     case EQUAL_TO: {
@@ -137,12 +149,6 @@ RC ComparisonExpr::compare_value(const Value &left, const Value &right, bool &re
     } break;
     case GREAT_THAN: {
       result = (cmp_result > 0);
-    } break;
-    case LIKE_OP: {
-      result = str_like(left, right);
-    } break;
-    case NOT_LIKE_OP: {
-      result = !str_like(left, right);
     } break;
     default: {
       LOG_WARN("unsupported comparison. %d", comp_);

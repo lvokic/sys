@@ -54,7 +54,7 @@ RC UpdateStmt::create(Db *db, const UpdateSqlNode &update, Stmt *&stmt)
   bool valid = false;
   FieldMeta update_field;
   for ( FieldMeta field :*fieldMeta) {
-    if( 0 == strcmp(field.name(),update.attribute_name.c_str()))
+    if( 0 == strcmp(field.name(),update.attribute_name.c_str()) || (update.value.is_null() && field.nullable()))
     {
       if(field.type() == update.value.attr_type())
       {

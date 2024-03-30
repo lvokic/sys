@@ -14,6 +14,7 @@ See the Mulan PSL v2 for more details. */
 
 #include "common/rc.h"
 #include "common/log/log.h"
+#include "common/lang/defer.h"
 #include "common/lang/string.h"
 #include "sql/stmt/filter_stmt.h"
 #include "storage/db/db.h"
@@ -89,6 +90,13 @@ RC FilterStmt::create_filter_unit(Db *db, Table *default_table, std::unordered_m
   }
 
   filter_unit = new FilterUnit;
+  DEFER([&](){
+    if (RC::SUCCESS != rc && nullptr != filter_unit) {
+      delete filter_unit;
+      filter_unit = nullptr;
+    }
+  });
+
   if (condition.left_is_attr) {
     Table *table = nullptr;
     const FieldMeta *field = nullptr;
