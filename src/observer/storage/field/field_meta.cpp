@@ -42,7 +42,7 @@ RC FieldMeta::init(const char *name, AttrType attr_type, int attr_offset, int at
     return RC::INVALID_ARGUMENT;
   }
 
-if (AttrType::UNDEFINED >= attr_type || AttrType::NULLS <= attr_type || attr_offset < 0 || attr_len <= 0) {
+  if (AttrType::UNDEFINED >= attr_type || AttrType::NULLS <= attr_type || attr_offset < 0 || attr_len <= 0) {
     LOG_WARN(
         "Invalid argument. name=%s, attr_type=%d, attr_offset=%d, attr_len=%d", name, attr_type, attr_offset, attr_len);
     return RC::INVALID_ARGUMENT;
@@ -53,6 +53,7 @@ if (AttrType::UNDEFINED >= attr_type || AttrType::NULLS <= attr_type || attr_off
   attr_len_ = attr_len;
   attr_offset_ = attr_offset;
   visible_ = visible;
+  nullable_ = nullable;
 
   LOG_INFO("Init a field with name=%s", name);
   return RC::SUCCESS;
@@ -140,7 +141,6 @@ RC FieldMeta::from_json(const Json::Value &json_value, FieldMeta &field)
     LOG_ERROR("Visible field is not a bool value. json value=%s", visible_value.toStyledString().c_str());
     return RC::INTERNAL;
   }
-
   if (!nullable_value.isBool()) {
     LOG_ERROR("Nullable field is not a bool value. json value=%s", nullable_value.toStyledString().c_str());
     return RC::INTERNAL;

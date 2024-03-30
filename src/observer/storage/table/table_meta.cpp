@@ -28,7 +28,11 @@ static const Json::StaticString FIELD_FIELDS("fields");
 static const Json::StaticString FIELD_INDEXES("indexes");
 
 TableMeta::TableMeta(const TableMeta &other)
-    : name_(other.name_), fields_(other.fields_), indexes_(other.indexes_), record_size_(other.record_size_)
+    : table_id_(other.table_id_),
+    name_(other.name_),
+    fields_(other.fields_),
+    indexes_(other.indexes_),
+    record_size_(other.record_size_)
 {}
 
 void TableMeta::swap(TableMeta &other) noexcept
@@ -52,7 +56,7 @@ RC TableMeta::init(int32_t table_id, const char *name, int field_num, const Attr
   }
 
   RC rc = RC::SUCCESS;
- 
+
   int field_offset = 0;
   int trx_field_num = 0;
   const vector<FieldMeta> *trx_fields = TrxKit::instance()->trx_fields();
@@ -71,14 +75,14 @@ RC TableMeta::init(int32_t table_id, const char *name, int field_num, const Attr
     // trx_fields
     for (size_t i = 0; i < trx_fields->size(); i++) {
       const FieldMeta &field_meta = (*trx_fields)[i];
-      fields_[i + 1] = FieldMeta(field_meta.name(), field_meta.type(), field_offset, field_meta.len(), false, field_meta.nullable());
+      fields_[i + 1] = FieldMeta(field_meta.name(), field_meta.type(), field_offset, field_meta.len(), false/*visible*/, field_meta.nullable());
       field_offset += field_meta.len();
     }
   }
 
   for (int i = 0; i < field_num; i++) {
     const AttrInfoSqlNode &attr_info = attributes[i];
-    rc = fields_[i + trx_field_num].init(attr_info.name.c_str(), 
+    rc = fields_[i + sys_field_num].init(attr_info.name.c_str(), 
             attr_info.type, field_offset, attr_info.length, true/*visible*/, attr_info.nullable);
     if (rc != RC::SUCCESS) {
       LOG_ERROR("Failed to init field meta. table name=%s, field name: %s", name, attr_info.name.c_str());
@@ -114,7 +118,7 @@ const FieldMeta *TableMeta::null_field() const
 
 const std::pair<const FieldMeta *, int> TableMeta::trx_fields() const
 {
-  return std::pair<const FieldMeta *, int>{fields_.data() + 1, sys_field_num()};
+  return std::pair<const FieldMeta *, int>{fields_.data() + 1, trx_field_num()};
 }
 
 const FieldMeta *TableMeta::field(int index) const
