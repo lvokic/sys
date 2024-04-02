@@ -348,7 +348,7 @@ RC Table::make_record(int value_num, const Value *values, Record &record)
 
   // null field
   const FieldMeta* null_field = table_meta_.null_field();
-  common::Bitmap null_bitmap(record_data + null_field->offset(), null_field->len());
+  common::Bitmap null_bitmap(record_data + null_field->offset(), table_meta_.field_num());
   null_bitmap.clear_bits();
 
   for (int i = 0; i < value_num; i++) {
