@@ -9,11 +9,11 @@ MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 See the Mulan PSL v2 for more details. */
 
 //
-// Created by qjw on 2024/3/29.
+// Created by qjw on 2024/4/2.
 //
 
 #include "sql/operator/update_logical_operator.h"
-UpdateLogicalOperator::UpdateLogicalOperator(Table *table, std::vector<Value>& values,std::vector<FieldMeta>& fields)
-    : table_(table), values_(values),fields_(fields)
+UpdateLogicalOperator::UpdateLogicalOperator(Table *table, std::vector<Value*> &values, std::vector<FieldMeta> &fields)
+    : table_(table), values_(values), fields_(fields)
 {
 }
