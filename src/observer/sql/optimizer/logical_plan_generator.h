@@ -21,6 +21,7 @@ See the Mulan PSL v2 for more details. */
 class Stmt;
 class CalcStmt;
 class SelectStmt;
+class FilterUnit;
 class FilterStmt;
 class InsertStmt;
 class DeleteStmt;
