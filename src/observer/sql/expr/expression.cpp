@@ -16,6 +16,8 @@ See the Mulan PSL v2 for more details. */
 #include "sql/expr/tuple.h"
 #include <regex>
 #include <string>
+#include "common/lang/string.h"
+
 using namespace std;
 
 RC FieldExpr::get_value(const Tuple &tuple, Value &value) const
@@ -182,15 +184,16 @@ RC ComparisonExpr::try_get_value(Value &cell) const
 
 RC ComparisonExpr::get_value(const Tuple &tuple, Value &value) const
 {
+  // c1 + c2 > c2 + c3
   Value left_value;
   Value right_value;
 
-  RC rc = left_->get_value(tuple, left_value);
+  RC rc = left_->get_value(tuple, left_value);  // 计算 c1 + c2
   if (rc != RC::SUCCESS) {
     LOG_WARN("failed to get value of left expression. rc=%s", strrc(rc));
     return rc;
   }
-  rc = right_->get_value(tuple, right_value);
+  rc = right_->get_value(tuple, right_value);   // 计算 c2 + c3
   if (rc != RC::SUCCESS) {
     LOG_WARN("failed to get value of right expression. rc=%s", strrc(rc));
     return rc;
@@ -218,15 +221,15 @@ RC ConjunctionExpr::get_value(const Tuple &tuple, Value &value) const
   }
 
   Value tmp_value;
-  for (const unique_ptr<Expression> &expr : children_) {
-    rc = expr->get_value(tuple, tmp_value);
+  for (const unique_ptr<Expression> &expr : children_) { // 多个条件以 and 连接
+    rc = expr->get_value(tuple, tmp_value); // 这里会进行表达式的连接
     if (rc != RC::SUCCESS) {
       LOG_WARN("failed to get value by child expression. rc=%s", strrc(rc));
       return rc;
     }
     bool bool_value = tmp_value.get_boolean();
     if ((conjunction_type_ == Type::AND && !bool_value) || (conjunction_type_ == Type::OR && bool_value)) {
-      value.set_boolean(bool_value);
+      value.set_boolean(bool_value);      // and 遇到 false 则退出， or 遇到 true 则退出
       return rc;
     }
   }
@@ -251,13 +254,18 @@ AttrType ArithmeticExpr::value_type() const
     return left_->value_type();
   }
 
+  if(left_->value_type() == AttrType::NULLS 
+    || right_->value_type() == AttrType::NULLS)
+  {
+    return AttrType::NULLS;
+  }
   if (left_->value_type() == AttrType::INTS &&
       right_->value_type() == AttrType::INTS &&
       arithmetic_type_ != Type::DIV) {
     return AttrType::INTS;
   }
   
-  return AttrType::FLOATS;
+  return AttrType::DOUBLES;
 }
 
 RC ArithmeticExpr::calc_value(const Value &left_value, const Value &right_value, Value &value) const
@@ -271,7 +279,7 @@ RC ArithmeticExpr::calc_value(const Value &left_value, const Value &right_value,
       if (target_type == AttrType::INTS) {
         value.set_int(left_value.get_int() + right_value.get_int());
       } else {
-        value.set_float(left_value.get_float() + right_value.get_float());
+        value.set_double(left_value.get_double() + right_value.get_double());
       }
     } break;
 
@@ -279,7 +287,7 @@ RC ArithmeticExpr::calc_value(const Value &left_value, const Value &right_value,
       if (target_type == AttrType::INTS) {
         value.set_int(left_value.get_int() - right_value.get_int());
       } else {
-        value.set_float(left_value.get_float() - right_value.get_float());
+        value.set_double(left_value.get_double() - right_value.get_double());
       }
     } break;
 
@@ -287,7 +295,7 @@ RC ArithmeticExpr::calc_value(const Value &left_value, const Value &right_value,
       if (target_type == AttrType::INTS) {
         value.set_int(left_value.get_int() * right_value.get_int());
       } else {
-        value.set_float(left_value.get_float() * right_value.get_float());
+        value.set_double(left_value.get_double() * right_value.get_double());
       }
     } break;
 
@@ -295,16 +303,16 @@ RC ArithmeticExpr::calc_value(const Value &left_value, const Value &right_value,
       if (target_type == AttrType::INTS) {
         if (right_value.get_int() == 0) {
           // NOTE: 设置为整数最大值是不正确的。通常的做法是设置为NULL，但是当前的miniob没有NULL概念，所以这里设置为整数最大值。
-          value.set_int(numeric_limits<int>::max());
+          value.set_null();
         } else {
           value.set_int(left_value.get_int() / right_value.get_int());
         }
       } else {
         if (right_value.get_float() > -EPSILON && right_value.get_float() < EPSILON) {
           // NOTE: 设置为浮点数最大值是不正确的。通常的做法是设置为NULL，但是当前的miniob没有NULL概念，所以这里设置为浮点数最大值。
-          value.set_float(numeric_limits<float>::max());
+          value.set_null();
         } else {
-          value.set_float(left_value.get_float() / right_value.get_float());
+          value.set_double(left_value.get_double() / right_value.get_double());
         }
       }
     } break;
@@ -313,7 +321,7 @@ RC ArithmeticExpr::calc_value(const Value &left_value, const Value &right_value,
       if (target_type == AttrType::INTS) {
         value.set_int(-left_value.get_int());
       } else {
-        value.set_float(-left_value.get_float());
+        value.set_double(-left_value.get_double());
       }
     } break;
 
@@ -337,10 +345,12 @@ RC ArithmeticExpr::get_value(const Tuple &tuple, Value &value) const
     LOG_WARN("failed to get value of left expression. rc=%s", strrc(rc));
     return rc;
   }
-  rc = right_->get_value(tuple, right_value);
-  if (rc != RC::SUCCESS) {
-    LOG_WARN("failed to get value of right expression. rc=%s", strrc(rc));
-    return rc;
+  if (right_) {
+    rc = right_->get_value(tuple, right_value);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to get value of right expression. rc=%s", strrc(rc));
+      return rc;
+    }
   }
   return calc_value(left_value, right_value, value);
 }
@@ -367,4 +377,47 @@ RC ArithmeticExpr::try_get_value(Value &value) const
   }
 
   return calc_value(left_value, right_value, value);
+}
+
+//检查表达式中出现的 表,列 是否存在
+RC FieldExpr::check_field(const std::unordered_map<std::string, Table *> &table_map,
+    const std::vector<Table *> &tables, Db *db, Table* default_table)
+{
+  ASSERT(field_name_ != "*", "ERROR!");
+  const char* table_name = table_name_.c_str();
+  const char* field_name = field_name_.c_str();
+  Table* table = nullptr;
+  if (!common::is_blank(table_name)) { // 表名不为空
+    // check table
+    auto it = table_map.find(table_name);
+    if (it == table_map.end()) {
+      LOG_WARN("no such table in from list: %s", table_name);
+      return RC::SCHEMA_FIELD_MISSING;
+    }
+    table = it->second;
+  } else {  // 表名为空，只有列名
+    if (tables.size() != 1 && default_table == nullptr) {
+      LOG_WARN("invalid. I do not know the attr's table. attr=%s", this->get_field_name().c_str());
+      return RC::SCHEMA_FIELD_MISSING;
+    }
+    table = default_table ? default_table : tables[0];
+  }
+  ASSERT(nullptr != table, "ERROR!");
+  // check field
+  const FieldMeta* field_meta = table->table_meta().field(field_name);
+  if (nullptr == field_meta) {
+    LOG_WARN("no such field. field=%s.%s.%s", db->name(), table->name(), field_name);
+    return RC::SCHEMA_FIELD_MISSING;
+  }
+  // set field
+  field_ = Field(table, field_meta);
+  // set name
+  bool is_single_table = (tables.size() == 1);
+  if (is_single_table) {
+    set_name(field_name);
+  } else {
+    set_name(table_name_ + "." + field_name); 
+  }
+  
+  return RC::SUCCESS;
 }
