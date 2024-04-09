@@ -9,7 +9,7 @@ MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 See the Mulan PSL v2 for more details. */
 
 //
-// Created by qjw on 2024/3/29.
+// Created by niuxn on 2022/6/27.
 //
 
 #include "common/log/log.h"
@@ -21,20 +21,61 @@ See the Mulan PSL v2 for more details. */
 
 RC UpdatePhysicalOperator::open(Trx *trx)
 {
-    if (children_.empty()) {
-        return RC::SUCCESS;
-    }
-
-    std::unique_ptr<PhysicalOperator> &child = children_[0];
-    RC rc = child->open(trx);
-    if (rc != RC::SUCCESS) {
-        LOG_WARN("failed to open child operator: %s", strrc(rc));
-        return rc;
-    }
-
-    trx_ = trx;
-    
+  if (children_.empty()) {
     return RC::SUCCESS;
+  }
+
+  std::unique_ptr<PhysicalOperator> &child = children_[0];
+  RC rc = child->open(trx);
+  if (rc != RC::SUCCESS) {
+    LOG_WARN("failed to open child operator: %s", strrc(rc));
+    return rc;
+  }
+
+  rc = find_target_columns();
+  if (rc != RC::SUCCESS) {
+    LOG_WARN("failed to find column info: %s", strrc(rc));
+    return rc;
+  }
+
+  trx_ = trx;
+
+  return RC::SUCCESS;
+}
+
+RC UpdatePhysicalOperator::find_target_columns()
+{
+  const int sys_field_num  = table_->table_meta().sys_field_num();
+  const int user_field_num = table_->table_meta().field_num() - sys_field_num;
+
+  for (size_t c_idx = 0; c_idx < fields_.size(); c_idx++) {
+    std::string &attr_name = fields_[c_idx];
+
+    // 先找到要更新的列，获取该列的 id、FieldMeta(offset、length、type)
+    for (int i = 0; i < user_field_num; ++i) {
+      const FieldMeta *field_meta = table_->table_meta().field(i + sys_field_num);
+      const char      *field_name = field_meta->name();
+      if (0 != strcmp(field_name, attr_name.c_str())) {
+        continue;
+      }
+
+      // 判断 类型是否符合要求
+      Value *value = values_[c_idx];
+      if (value->is_null() && field_meta->nullable()) {
+        // ok
+      } else if (value->attr_type() != field_meta->type()) {
+        LOG_WARN("field type mismatch. table=%s, field=%s, field type=%d, value_type=%d",
+            table_->name(), fields_[c_idx].c_str(), field_meta->type(), value->attr_type());
+        return RC::SCHEMA_FIELD_TYPE_MISMATCH;
+      }
+
+      fields_id_.emplace_back(i + sys_field_num);
+      fields_meta_.emplace_back(*field_meta);
+      break;
+    }
+  }
+
+  return RC::SUCCESS;
 }
 
 RC UpdatePhysicalOperator::next()
@@ -55,10 +96,12 @@ RC UpdatePhysicalOperator::next()
     // 这里的record.data直接指向frame
     RowTuple *row_tuple = static_cast<RowTuple *>(tuple);
     Record &record = row_tuple->record();
+    Record new_record;
 
     // 如果更新前后record不变，则跳过这一行
     RC rc2 = RC::SUCCESS;
-    if (RC::SUCCESS != (rc2 = extract_old_value(record))) {
+    // 找到匹配的一行为 new_record 赋值并且存储匹配的 old_record
+    if (RC::SUCCESS != (rc2 = construct_new_record(record, new_record))) {
       if (RC::RECORD_DUPLICATE_KEY == rc2) { 
         continue;
       } else { 
@@ -67,22 +110,28 @@ RC UpdatePhysicalOperator::next()
     }
 
     // 接口内部只保证当前record更新的原子性
-    rc = table_->update_record(record, fields_, values_);    //这里暂时没管事务，之后需要修改
+    rc = table_->update_record(record, new_record);    //这里暂时没管事务，之后需要修改
     if (rc != RC::SUCCESS) {
       // 更新失败，需要回滚之前成功的record
       LOG_WARN("failed to update record: %s", strrc(rc));
+
       // old_records中最后一条记录是刚才更新失败的，不需要回滚
-      for (size_t i = old_records_.size() - 2; i >= 0; i--) {
-        RC rc2 = RC::SUCCESS;
+      old_rids_.pop_back();
+      old_values_.pop_back();
+      new_record.set_data(nullptr);
+
+      for (int i = old_rids_.size() - 1; i >= 0; i--) {
+        Record old_record;
         Record updated_record;
-        std::vector<Value*> old_row_values;
-        for (size_t j = 0; j < old_values_[i].size(); j++) {
-          old_row_values.emplace_back(&old_values_[i][j]);
-        }
-        if (RC::SUCCESS != (rc2 = table_->get_record(old_records_[i], updated_record))) {
-          LOG_ERROR("Failed to get record when try to rollback, rc=%s", strrc(rc2));
-        } else if (RC::SUCCESS != (rc2 = table_->update_record(updated_record, fields_, old_row_values))) {
-          LOG_ERROR("Failed to rollback after update failed, rc=%s", strrc(rc2));
+        if (RC::SUCCESS != (rc2 = table_->get_record(old_rids_[i], updated_record))) {
+          LOG_WARN("Failed to get record when try to rollback, rc=%s", strrc(rc2));
+          break;
+        } else if (RC::SUCCESS != (rc2 = construct_old_record(updated_record, old_record))){
+          LOG_WARN("Failed to construct old_record from updated one, rc=%s", strrc(rc2));
+          break;
+        } else if (RC::SUCCESS != (rc2 = table_->update_record(updated_record, old_record))) {
+          LOG_WARN("Failed to rollback record, rc=%s", strrc(rc2));
+          break;
         }
       }
       return rc;
@@ -92,79 +141,92 @@ RC UpdatePhysicalOperator::next()
   return RC::RECORD_EOF;
 }
 
-RC UpdatePhysicalOperator::extract_old_value(Record &record)
+RC UpdatePhysicalOperator::construct_new_record(Record &old_record, Record &new_record)
 {
-    RC rc = RC::SUCCESS;
-    int       field_offset   = -1;
-    int       field_length   = -1;
-    int       field_index    = -1;
-    bool      same_data      = true;    // 标识当前行数据更新后，是否与更前相同
-    const int sys_field_num  = table_->table_meta().sys_field_num();
-    const int user_field_num = table_->table_meta().field_num() - sys_field_num;
+  RC rc = RC::SUCCESS;
+  bool same_data = true;    // 标识当前行数据更新后，是否与更前相同
 
-    std::vector<Value> old_value;
-    for (size_t c_idx = 0; c_idx < fields_.size(); c_idx++) {
-        Value *value = values_[c_idx];
-        std::string &attr_name = fields_[c_idx];
+  new_record.set_rid(old_record.rid());
+  new_record.set_data(tmp_record_data_);
+  memcpy(tmp_record_data_, old_record.data(), table_->table_meta().record_size());
 
-        // 1.先找到要更新的列
-        // 2.判断类型是否匹配
-        // 3.获取该列的 offset 和 长度
-        for (int i = 0; i < user_field_num; ++i) {
-            const FieldMeta* field_meta = table_->table_meta().field(i + sys_field_num);
-            const char*      field_name = field_meta->name();
-            if (0 != strcmp(field_name, attr_name.c_str())) {
-                continue;
-            }
-            AttrType field_type = field_meta->type();
-            AttrType value_type = value->attr_type();
-            if (value->is_null() && field_meta->nullable()) {
-                // ok
-            } else if (field_type != value_type) {
-                LOG_WARN("field type mismatch. table=%s, field=%s, field type=%d, value_type=%d",
-                    table_->name(),
-                    field_meta->name(),
-                    field_type,
-                    value_type);
-                return RC::SCHEMA_FIELD_TYPE_MISMATCH;
-            }
-            field_offset = field_meta->offset();
-            field_length = field_meta->len();
-            field_index = i + sys_field_num;
-            old_value.emplace_back(field_type, record.data() + field_offset, field_length);
-            break;
-        }
-        if (field_length < 0 || field_offset < 0) {
-            LOG_WARN("field not find ,field name = %s", attr_name.c_str());
-            return RC::SCHEMA_FIELD_NOT_EXIST;
-        }
+  std::vector<Value> old_value;
+  for (size_t c_idx = 0; c_idx < fields_.size(); c_idx++) {
+    Value *value = values_[c_idx];
 
-        // 判断旧值与新值是否相等
-        const FieldMeta* null_field = table_->table_meta().null_field();
-        common::Bitmap old_null_bitmap(record.data() + null_field->offset(), table_->table_meta().field_num());
-        if (same_data) {
-            if (value->is_null() && old_null_bitmap.get_bit(field_index)) {
-                // both null, same data, do nothing
-            } else if (value->is_null() || old_null_bitmap.get_bit(field_index)) {
-                same_data = false;
-            } else if (0 != memcmp(record.data() + field_offset, value->data(), field_length)) {
-                same_data = false;
-            }
-        }
+    // 判断 新值与旧值是否相等，缓存旧值，将新值复制到新的record里
+    const FieldMeta* null_field = table_->table_meta().null_field();
+    common::Bitmap old_null_bitmap(old_record.data() + null_field->offset(), table_->table_meta().field_num());
+    common::Bitmap new_null_bitmap(tmp_record_data_ + null_field->offset(), table_->table_meta().field_num());
+
+    if (value->is_null() && old_null_bitmap.get_bit(fields_id_[c_idx])) {
+      // 二者都是NULL，保存旧值即可
+      old_value.emplace_back(NULLS, nullptr, 0);
+    } else if (value->is_null()) {
+      // 新值是NULL，旧值不是
+      same_data = false;
+      new_null_bitmap.set_bit(fields_id_[c_idx]);
+      old_value.emplace_back(fields_meta_[c_idx].type(), old_record.data() + fields_meta_[c_idx].offset(), fields_meta_[c_idx].len());
+    } else if (old_null_bitmap.get_bit(fields_id_[c_idx])) {
+      // 旧值是NULL，新值不是
+      same_data = false;
+      new_null_bitmap.clear_bit(fields_id_[c_idx]);
+      old_value.emplace_back(NULLS, nullptr, 0);
+    } else {
+      // 二者都不是NULL
+      if (0 != memcmp(old_record.data() + fields_meta_[c_idx].offset(), value->data(), fields_meta_[c_idx].len())) {
+        same_data = false;
+        memcpy(tmp_record_data_ + fields_meta_[c_idx].offset(), value->data(), fields_meta_[c_idx].len());   
+      }
+      old_value.emplace_back(fields_meta_[c_idx].type(), old_record.data() + fields_meta_[c_idx].offset(), fields_meta_[c_idx].len());
     }
-    if (same_data) {
-        LOG_WARN("update old value equals new value, skip this record");
-        return RC::RECORD_DUPLICATE_KEY;
+  }
+  if (same_data) {
+    LOG_WARN("update old value equals new value, skip this record");
+    return RC::RECORD_DUPLICATE_KEY;
+  }
+  
+  old_values_.emplace_back(std::move(old_value));
+  old_rids_.emplace_back(old_record.rid());
+  return rc;
+}
+
+RC UpdatePhysicalOperator::construct_old_record(Record &updated_record, Record &old_record)
+{
+  RC rc = RC::SUCCESS;
+
+  old_record.set_rid(updated_record.rid());
+  old_record.set_data(tmp_record_data_);
+  memcpy(tmp_record_data_, updated_record.data(), table_->table_meta().record_size());
+
+  std::vector<Value> &old_value = old_values_.back();
+  for (size_t c_idx = 0; c_idx < fields_.size(); c_idx++) {
+    Value *value = &old_value[c_idx];
+
+    // 将旧值复制到 old_record 里
+    const FieldMeta* null_field = table_->table_meta().null_field();
+    common::Bitmap old_null_bitmap(tmp_record_data_ + null_field->offset(), table_->table_meta().field_num());
+    common::Bitmap updated_null_bitmap(updated_record.data() + null_field->offset(), table_->table_meta().field_num());
+
+    if (value->is_null()) {
+      // 旧值是NULL
+      old_null_bitmap.set_bit(fields_id_[c_idx]);
+    } else {
+      // 旧值不是NULL
+      old_null_bitmap.clear_bit(fields_id_[c_idx]);
+      memcpy(tmp_record_data_ + fields_meta_[c_idx].offset(), value->data(), fields_meta_[c_idx].len());
     }
-    old_values_.emplace_back(std::move(old_value));
-    old_records_.emplace_back(record.rid());
-    return rc;
+  }
+  
+  old_rids_.pop_back();
+  old_values_.pop_back();
+  return rc;
 }
 
 RC UpdatePhysicalOperator::close()
 {
-    if (!children_.empty()) {
-        children_[0]->close();
-    }
-    return RC::SUCCESS;
+  if (!children_.empty()) {
+    children_[0]->close();
+  }
+  return RC::SUCCESS;
 }

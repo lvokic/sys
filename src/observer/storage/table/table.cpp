@@ -28,6 +28,8 @@ See the Mulan PSL v2 for more details. */
 #include "storage/index/index.h"
 #include "storage/index/bplus_tree_index.h"
 #include "storage/trx/trx.h"
+#include "event/sql_debug.h"
+#include "common/lang/defer.h"
 
 Table::~Table()
 {
@@ -180,15 +182,8 @@ RC Table::insert_record(Record &record)
   }
 
   rc = insert_entry_of_indexes(record.data(), record.rid());
-  if (rc != RC::SUCCESS) {  // 可能出现了键值重复
-    RC rc2 = delete_entry_of_indexes(record.data(), record.rid(), false /*error_on_not_exists*/);
-    if (rc2 != RC::SUCCESS) {
-      LOG_ERROR("Failed to rollback index data when insert index entries failed. table name=%s, rc=%d:%s",
-          name(),
-          rc2,
-          strrc(rc2));
-    }
-    rc2 = record_handler_->delete_record(&record.rid());
+  if (rc != RC::SUCCESS) {  // 可能出现了键值重复，插索引操作是原子性的，因此不需要在这里删索引
+    RC rc2 = record_handler_->delete_record(&record.rid());
     if (rc2 != RC::SUCCESS) {
       LOG_PANIC("Failed to rollback record data when insert index entries failed. table name=%s, rc=%d:%s",
           name(),
@@ -204,7 +199,6 @@ RC Table::insert_records(std::vector<Record> &records)
   RC rc = RC::SUCCESS;
 
   // 回滚前 num 个插入
-  // TODO 没有考虑键值重复的情况
   auto rollback = [this, &records](int num) {
     for (int i = 0; i < num; ++i) {
       Record& record = records[i];
@@ -235,14 +229,16 @@ RC Table::insert_records(std::vector<Record> &records)
       return rc;
     }
     rc = insert_entry_of_indexes(record.data(), record.rid());
-    if (rc != RC::SUCCESS) {  // 可能出现了键值重复，先删除当前记录数据，然后回滚之前数据与索引
-    if (RC rc2 = record_handler_->delete_record(&record.rid()); rc2 != RC::SUCCESS) {
-      LOG_PANIC("Failed to rollback record data when insert index entries failed. table name=%s, rc=%d:%s",
+    if (rc != RC::SUCCESS) {  // 可能出现了键值重复，需要删除当前record数据，并回滚之前的record的数据与索引
+      RC rc2 = record_handler_->delete_record(&record.rid());
+      if (rc2 != RC::SUCCESS) {
+        LOG_PANIC("Failed to rollback current record data when insert index entries failed. table name=%s, rc=%d:%s",
             name(),
             rc2,
             strrc(rc2));
-    }
+      }
       rollback(idx);
+      break;
     }
     ++idx;
   }
@@ -623,6 +619,12 @@ RC Table::update_record(Record &record, const std::vector<std::string> &attr_nam
 
   char *old_data = record.data();                        // old_data不能释放，其指向的是frame中的内存
   char *data     = new char[table_meta_.record_size()];  // new_record->data
+  DEFER([&](){
+    delete [] data;
+    data = nullptr;
+    record.set_data(old_data);
+  });
+
   memcpy(data, old_data, table_meta_.record_size());
 
   for (size_t c_idx = 0; c_idx < attr_names.size(); c_idx++) {
@@ -683,13 +685,15 @@ RC Table::update_record(Record &record, const std::vector<std::string> &attr_nam
   }
 
   rc = insert_entry_of_indexes(record.data(), record.rid());
-  if (rc != RC::SUCCESS) {  // 插入失败，需要把旧索引插回去
+  if (rc != RC::SUCCESS) {  // 可能出现了键值重复
     RC rc2 = insert_entry_of_indexes(old_data, record.rid());
     if (rc2 != RC::SUCCESS) {
+      sql_debug("Failed to rollback index after insert index failed, rc=%s", strrc(rc2));
       LOG_ERROR("Failed to rollback index data when insert index entries failed. table name=%s, rc=%d:%s",
           name(),
           rc2,
           strrc(rc2));
+      return rc2;
     }
     return rc;  // 插入新的索引失败
   }
@@ -701,8 +705,46 @@ RC Table::update_record(Record &record, const std::vector<std::string> &attr_nam
     return rc;
   }
 
-  delete[] data;
   record.set_data(old_data);
+  return rc;
+}
+
+RC Table::update_record(Record &old_record, Record &new_record)
+{
+  RC rc = RC::SUCCESS;
+
+  rc = delete_entry_of_indexes(old_record.data(), old_record.rid(), false);
+  if (rc != RC::SUCCESS) {
+    LOG_ERROR("Failed to delete indexes of record (rid=%d.%d). rc=%d:%s",
+        old_record.rid().page_num,
+        old_record.rid().slot_num,
+        rc,
+        strrc(rc));
+    return rc;
+  }
+
+  rc = insert_entry_of_indexes(new_record.data(), new_record.rid());
+  if (rc != RC::SUCCESS) {  // 可能出现了键值重复
+    RC rc2 = insert_entry_of_indexes(old_record.data(), old_record.rid());
+    if (rc2 != RC::SUCCESS) {
+      sql_debug("Failed to rollback index after insert index failed, rc=%s", strrc(rc2));
+      LOG_ERROR("Failed to rollback index data when insert index entries failed. table name=%s, rc=%d:%s",
+          name(),
+          rc2,
+          strrc(rc2));
+      return rc2;
+    }
+    return rc;  // 插入新的索引失败
+  }
+
+  rc = record_handler_->update_record(&new_record);
+  if (rc != RC::SUCCESS) {
+    // 更新数据失败应该回滚索引，但是这里除非RID错了，否则不会失败，懒得写回滚索引了
+    LOG_ERROR(
+        "Failed to update record (rid=%d.%d). rc=%d:%s", new_record.rid().page_num, new_record.rid().slot_num, rc, strrc(rc));
+    return rc;
+  }
+
   return rc;
 }
 

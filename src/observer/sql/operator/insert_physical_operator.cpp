@@ -29,17 +29,27 @@ RC InsertPhysicalOperator::open(Trx *trx)
   records.resize(values_.size());
   RC rc = RC::SUCCESS;
   for (int i = 0; i < values_.size(); ++i) {
-    auto& rec = records[i];
-    rc = table_->make_record(static_cast<int>(values_[i].size()), values_[i].data(), rec);
+    auto& rcd = records[i];
+    rc = table_->make_record(static_cast<int>(values_[i].size()), values_[i].data(), rcd);
     if (rc != RC::SUCCESS) {
       LOG_WARN("failed to make record. rc=%s", strrc(rc));
       return rc;
     }
-  }
-
-  rc = trx->insert_records(table_, records);
-  if (rc != RC::SUCCESS) {
-    LOG_WARN("failed to insert record by transaction. rc=%s", strrc(rc));
+    rc = trx->insert_record(table_, rcd);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to insert record by transaction. rc=%s", strrc(rc));
+      // 插入失败，需要回滚之前插入成功的记录
+      RC rc2 = RC::SUCCESS;
+      for (int j = i - 1; j >= 0; j--) {
+        Record &done_rcd = records[j];
+        rc2 = trx->delete_record(table_, done_rcd);
+        if (RC::SUCCESS != rc2) {
+          LOG_WARN("failed to rollback record after insert failed. rc=%s", strrc(rc2));
+          break;
+        }
+      }
+      break;  // 插入失败，回滚后应该停止继续插入
+    }
   }
   return rc;
 }
