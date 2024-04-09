@@ -217,6 +217,11 @@ const IndexMeta *TableMeta::index(int i) const
   return &indexes_[i];
 }
 
+const std::vector<IndexMeta> TableMeta::indexes() const
+{
+  return indexes_;
+}
+
 int TableMeta::index_num() const
 {
   return indexes_.size();
