@@ -31,12 +31,13 @@ class FieldMeta
 {
 public:
   FieldMeta();
-  FieldMeta(const char *name, AttrType attr_type, int attr_offset, int attr_len, bool visible, bool nullable = false);
+  FieldMeta(const char *name, AttrType attr_type, int attr_offset, int attr_len, bool visible, bool nullable,
+            int index);
   ~FieldMeta() = default;
   FieldMeta(const FieldMeta& other) = default;
   FieldMeta& operator=(const FieldMeta& other) = default;
 
-  RC init(const char *name, AttrType attr_type, int attr_offset, int attr_len, bool visible, bool nullable = false);
+  RC init(const char *name, AttrType attr_type, int attr_offset, int attr_len, bool visible, bool nullable, int index);
 
 public:
   const char *name() const;
@@ -45,6 +46,7 @@ public:
   int len() const;
   bool visible() const;
   bool nullable() const;
+  int index() const;
 
 public:
   void desc(std::ostream &os) const;
@@ -60,4 +62,5 @@ protected:
   int           attr_len_;
   bool          visible_;
   bool          nullable_;
+  int           index_;
 };

@@ -166,6 +166,14 @@ public:
     }
   }
 
+  void set_schema(const Table *table, const std::vector<FieldMeta> *fields) {
+    table_ = table;
+    this->speces_.reserve(fields->size());
+    for (const FieldMeta &field : *fields) {
+      speces_.push_back(new FieldExpr(table, &field));
+    }
+  }
+
   int cell_num() const override
   {
     return speces_.size();

@@ -88,7 +88,7 @@ public:
   RC recover_insert_record(Record &record);
 
   // TODO refactor
-  RC create_index(Trx *trx, const FieldMeta *field_meta, const char *index_name);
+  RC create_index(Trx *trx, const std::vector<FieldMeta> &field_meta, const char *index_name, bool unique);
 
   RC get_record_scanner(RecordFileScanner &scanner, Trx *trx, bool readonly);
 
@@ -102,6 +102,7 @@ public:
   const char *name() const;
 
   const TableMeta &table_meta() const;
+  TableMeta &table_meta();
 
   RC sync();
   RC drop(const char *dir);
@@ -118,11 +119,15 @@ private:
 public:
   Index *find_index(const char *index_name) const;
   Index *find_index_by_field(const char *field_name) const;
+  Index *find_index_by_fields(std::vector<const char *> fields) const;
+
+private:
+  RC flush_table_meta_file(TableMeta &new_table_meta);
 
 private:
   std::string base_dir_;
-  TableMeta   table_meta_;
-  DiskBufferPool *data_buffer_pool_ = nullptr;   /// 数据文件关联的buffer pool
-  RecordFileHandler *record_handler_ = nullptr;  /// 记录操作
+  TableMeta table_meta_;
+  DiskBufferPool *data_buffer_pool_ = nullptr;  /// 数据文件关联的buffer pool
+  RecordFileHandler *record_handler_ = nullptr; /// 记录操作
   std::vector<Index *> indexes_;
 };

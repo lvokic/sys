@@ -68,14 +68,14 @@ RC TableMeta::init(int32_t table_id, const char *name, int field_num, const Attr
 
   // __null
   int null_len = (sys_field_num + field_num + 7) / 8; // one field one bit
-  fields_[0] = FieldMeta("__null", CHARS, 0, null_len, false, false);
+  fields_[0] = FieldMeta("__null", CHARS, 0, null_len, false, false, 0);
   field_offset += null_len;
 
   if (trx_fields != nullptr) {
     // trx_fields
     for (size_t i = 0; i < trx_fields->size(); i++) {
       const FieldMeta &field_meta = (*trx_fields)[i];
-      fields_[i + 1] = FieldMeta(field_meta.name(), field_meta.type(), field_offset, field_meta.len(), false/*visible*/, field_meta.nullable());
+      fields_[i + 1] = FieldMeta(field_meta.name(), field_meta.type(), field_offset, field_meta.len(), false/*visible*/, field_meta.nullable(), i + 1);
       field_offset += field_meta.len();
     }
   }
@@ -83,7 +83,7 @@ RC TableMeta::init(int32_t table_id, const char *name, int field_num, const Attr
   for (int i = 0; i < field_num; i++) {
     const AttrInfoSqlNode &attr_info = attributes[i];
     rc = fields_[i + sys_field_num].init(attr_info.name.c_str(), 
-            attr_info.type, field_offset, attr_info.length, true/*visible*/, attr_info.nullable);
+            attr_info.type, field_offset, attr_info.length, true/*visible*/, attr_info.nullable, i + sys_field_num);
     if (rc != RC::SUCCESS) {
       LOG_ERROR("Failed to init field meta. table name=%s, field name: %s", name, attr_info.name.c_str());
       return rc;
@@ -179,11 +179,37 @@ const IndexMeta *TableMeta::index(const char *name) const
 const IndexMeta *TableMeta::find_index_by_field(const char *field) const
 {
   for (const IndexMeta &index : indexes_) {
-    if (0 == strcmp(index.field(), field)) {
+    if (0 == strcmp(index.fields()[0].name(), field)) {
       return &index;
     }
   }
   return nullptr;
+}
+
+const IndexMeta *TableMeta::find_index_by_fields(std::vector<const char *> fields) const {
+  // 找到一个命中字段最多的索引
+  int nmax = 0;
+  const IndexMeta *ret = nullptr;
+  for (const IndexMeta &index : indexes_) {
+    auto &index_fields = index.fields();
+    int cnt = 0;
+    for (auto &field : index_fields) {
+      bool found = false;
+      for (auto f : fields)
+        if (strcmp(field.name(), f) == 0) {
+          found = true;
+        }
+      if (found)
+        cnt++;
+      else
+        break;
+    }
+    if (cnt == index_fields.size()) {
+      if (nmax < cnt)
+        nmax = cnt, ret = &index;
+    }
+  }
+  return ret;
 }
 
 const IndexMeta *TableMeta::index(int i) const
