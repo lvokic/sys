@@ -887,6 +887,13 @@ RC Table::drop(const char *dir)
     std::string        data_file = table_data_file(dir, name());
     BufferPoolManager &bpm       = BufferPoolManager::instance();
     rc                           = bpm.remove_file(data_file.c_str());
+
+    // 4.destroy text handler
+    // 5.destory buffer pool and remove text fild
+    if (nullptr != text_buffer_pool_) {
+      std::string        text_file = table_text_file(dir, name());
+      rc                          = bpm.remove_file(text_file.c_str());
+    }
   }
   return rc;
 }
