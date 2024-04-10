@@ -181,6 +181,7 @@ public:
 
   RC cell_at(int index, Value &cell) const override
   {
+    RC rc = RC::SUCCESS;
     if (index < 0 || index >= static_cast<int>(speces_.size())) {
       LOG_WARN("invalid argument. index=%d", index);
       return RC::INVALID_ARGUMENT;
@@ -191,8 +192,22 @@ public:
     } else {
       FieldExpr *field_expr = speces_[index];
       const FieldMeta *field_meta = field_expr->field().meta();
-      cell.set_type(field_meta->type());
-      cell.set_data(this->record_->data() + field_meta->offset(), field_meta->len());
+      if (field_meta->type() == TEXTS) {
+        cell.set_type(CHARS);
+        int64_t offset = *(int64_t*)(record_->data() + field_meta->offset());
+        int     length = *(int64_t*)(record_->data() + field_meta->offset() + sizeof(int64_t));
+        char*   text   = (char*)malloc(length);
+        rc             = table_->read_text(offset, length, text);
+        if (RC::SUCCESS != rc) {
+          LOG_WARN("Failed to read text from table, rc=%s", strrc(rc));
+          return rc;
+        }
+        cell.set_data(text, length);
+        free(text);
+      } else {
+          cell.set_type(field_meta->type());
+          cell.set_data(this->record_->data() + field_meta->offset(), field_meta->len());
+      }
     }
     return RC::SUCCESS;
   }
