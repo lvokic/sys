@@ -20,7 +20,8 @@ See the Mulan PSL v2 for more details. */
 #include "common/lang/string.h"
 #include "common/time/date.h"
 
-const char *ATTR_TYPE_NAME[] = {"undefined", "chars", "ints", "floats", "doubles", "dates", "long", "texts", "nulls", "booleans"};
+const char *ATTR_TYPE_NAME[] = {
+    "undefined", "chars", "ints", "floats", "doubles", "dates", "long", "texts", "nulls", "booleans"};
 
 const char *attr_type_to_string(AttrType type)
 {
@@ -426,7 +427,61 @@ bool Value::get_boolean() const
   return false;
 }
 
-bool Value::convert(AttrType from, AttrType to, Value &value) {
+const Value& Value::min(const Value &a, const Value &b)
+{
+  if (a.is_null()) {
+    return b;  // even if b is also null
+  }
+  return a.compare(b) <= 0 ? a : b;
+}
+const Value& Value::max(const Value &a, const Value &b)
+{
+  if (a.is_null()) {
+    return b;  // even if b is also null
+  }
+  return a.compare(b) >= 0 ? a : b;
+}
+
+const Value Value::add(const Value &left, const Value &right)
+{
+  Value result_cell;
+  if (left.is_null() || right.is_null()) {
+    result_cell.set_null();
+    return result_cell;
+  }
+  if (left.attr_type() == INTS && right.attr_type() == INTS) {
+    int result = left.get_int() + right.get_int();
+    result_cell.set_int(result);
+  } else {
+    double tmp_left = left.get_double();
+    double tmp_right = right.get_double();
+    double result = tmp_left + tmp_right;
+    result_cell.set_double(result);
+  }
+  return result_cell;
+}
+
+const Value Value::div(const Value &left, const Value &right)
+{
+  Value result_cell;
+  if (left.is_null() || right.is_null()) {
+    result_cell.set_null();
+    return result_cell;
+  }
+  if(right.get_double() == 0) {
+    result_cell.set_null();
+  }
+  else {
+    double tmp_left = left.get_double();
+    double tmp_right = right.get_double();
+    double result = tmp_left / tmp_right;
+    result_cell.set_double(result);
+  }
+  return result_cell;
+}
+
+bool Value::convert(AttrType from, AttrType to, Value &value)
+{
   if (from == to) {
     return true;
   }
