@@ -4,6 +4,7 @@ CREATE INDEX index_id on Update_table_1(id);
 INSERT INTO Update_table_1 VALUES (1,'N1',1,1);
 INSERT INTO Update_table_1 VALUES (2,'N2',1,1);
 INSERT INTO Update_table_1 VALUES (3,'N3',2,1);
+INSERT INTO Update_table_1(id, t_name, col1) VALUES (1,'N1',1);
 
 -- echo 1. update a row
 UPDATE Update_table_1 SET t_name='N01' WHERE id=1;

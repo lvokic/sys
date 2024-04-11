@@ -147,6 +147,17 @@ const FieldMeta *TableMeta::find_field_by_offset(int offset) const
   }
   return nullptr;
 }
+
+const int TableMeta::find_field_idx_by_name(const char *field_name) const
+{
+  for (int i = 0; i < fields_.size(); i++) {
+    if (0 == strcmp(fields_[i].name(), field_name)) {
+      return i;
+    }
+  }
+  return -1;
+}
+
 int TableMeta::field_num() const
 {
   return fields_.size();
