@@ -44,3 +44,5 @@ UPDATE Update_table_1 SET col1='N01' WHERE id=1;
 CREATE TABLE students (id INT,name CHAR(50),age INT,grade CHAR(1));
 INSERT INTO students VALUES (1, 'Alice', 18, 'A'),(2, 'Bob', 19, 'B'),(3, 'Charlie', 20, 'C');
 UPDATE students SET age = 20, grade = 'A' WHERE name = 'Bob';
+
+create table create_table_select_t3 as select * from Update_table_1;
