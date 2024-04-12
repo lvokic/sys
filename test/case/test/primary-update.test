@@ -46,3 +46,16 @@ INSERT INTO students VALUES (1, 'Alice', 18, 'A'),(2, 'Bob', 19, 'B'),(3, 'Charl
 UPDATE students SET age = 20, grade = 'A' WHERE name = 'Bob';
 
 create table create_table_select_t3 as select * from Update_table_1;
+
+select date_format('2019-08-21', '%y/%m/%d') as date_type;
++ failed to receive response from observer. reason=Failed to receive from server. poll return POLLHUP=16 or POLLERR=str(event & select.POLLERR)
+failed to receive response from observer. reason=Failed to receive from server. poll return POLLHUP=16 or POLLERR=str(event & select.POLLERR)
+-- below are some requests executed before(partial) --
+-- init data
+CREATE TABLE function_table(id int, name char(20), score float, u_date date);
+CREATE TABLE function_table_2(id int, name char(30), score float, u_date date);
+insert into function_table VALUES (6, 'O396ZUENRPATV2TF2D', 8.71, '2024-06-04');
+insert into function_table VALUES (7, 'RA0DQR87', 9.65, '2023-08-13');
+insert into function_table VALUES (8, 'TMO0QYD', 2.53, '2021-12-10');
+select date_format('2019-08-21', '%y/%m/%d') as date_type;
+...

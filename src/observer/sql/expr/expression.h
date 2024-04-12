@@ -658,7 +658,7 @@ public:
 
   RC get_func_round_value(const Tuple &tuple, Value &value) const;
 
-  RC get_func_data_format_value(const Tuple &tuple, Value &value) const;
+  RC get_func_date_format_value(const Tuple &tuple, Value &value) const;
 
   RC get_value(const Tuple &tuple, Value &value) const override
   {
@@ -673,7 +673,7 @@ public:
         break;
       }
       case SYS_FUNC_DATE_FORMAT: {
-        rc = get_func_data_format_value(tuple, value);
+        rc = get_func_date_format_value(tuple, value);
         break;
       }
       default:

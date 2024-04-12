@@ -576,37 +576,40 @@ RC SysFuncExpr::get_func_round_value(const Tuple &tuple, Value &value) const
   return RC::SUCCESS;
 }
 
-RC SysFuncExpr::get_func_data_format_value(const Tuple &tuple, Value &value) const
+RC SysFuncExpr::get_func_date_format_value(const Tuple &tuple, Value &value) const
 {
-  auto& date_expr = params_[0];
-  auto& format_expr = params_[1];
+  auto &date_expr = params_[0];
+  auto &format_expr = params_[1];
   Value date_expr_cell;
   Value format_expr_cell;
   date_expr->get_value(tuple, date_expr_cell);
   format_expr->get_value(tuple, format_expr_cell);
-  if (date_expr_cell.attr_type() != DATES || format_expr_cell.attr_type() != DATES) {
+  if (date_expr_cell.attr_type() != DATES) {
     return RC::INTERNAL;
   }
-  int         cell_date         = date_expr_cell.get_int();
+  if (format_expr_cell.attr_type() != CHARS) {
+    return RC::INTERNAL;
+  }
+  int cell_date = date_expr_cell.get_int();
   const char *cell_format_chars = format_expr_cell.data();
 
   std::string result_date_str;
   int         year  = cell_date / 10000;
   int         month = (cell_date / 100) % 100;
   int         day   = cell_date % 100;
-  for (size_t i = 0; i < strlen(cell_format_chars); ++i) {
+  for (size_t i = 0; i < strlen(cell_format_chars); i++) {
     // A ~ z
     if (65 <= cell_format_chars[i] && cell_format_chars[i] <= 122) {
       switch (cell_format_chars[i]) {
         case 'Y': {
           char tmp[5];
-          snprintf(tmp, sizeof(tmp), "%d", year);
+          snprintf(tmp, 5 * sizeof(char), "%d", year);
           result_date_str += tmp;
           break;
         }
         case 'y': {
           char tmp[5];
-          snprintf(tmp, sizeof(tmp), "%d", year % 100);
+          snprintf(tmp, 5 * sizeof(char), "%d", year % 100);
           if (0 <= (year % 100) && (year % 100) <= 9) {
             result_date_str += "0";
           }
@@ -622,7 +625,7 @@ RC SysFuncExpr::get_func_data_format_value(const Tuple &tuple, Value &value) con
         }
         case 'm': {
           char tmp[3];
-          snprintf(tmp, sizeof(tmp), "%d", month);
+          snprintf(tmp, 3 * sizeof(char), "%d", month);
           if (0 <= month && month <= 9) {
             result_date_str += "0";
           }
@@ -631,7 +634,7 @@ RC SysFuncExpr::get_func_data_format_value(const Tuple &tuple, Value &value) con
         }
         case 'D': {
           char tmp[3];
-          snprintf(tmp, sizeof(tmp), "%d", day);
+          snprintf(tmp, 3 * sizeof(char), "%d", day);
           result_date_str += tmp;
           if (11 <= day && day <= 13) {
             result_date_str += "th";
@@ -659,7 +662,7 @@ RC SysFuncExpr::get_func_data_format_value(const Tuple &tuple, Value &value) con
         }
         case 'd': {
           char tmp[3];
-          snprintf(tmp, sizeof(tmp), "%d", day);
+          snprintf(tmp, 3 * sizeof(char) ,"%d", day);
           if (0 <= day && day <= 9) {
             result_date_str += "0";
           }
@@ -670,7 +673,7 @@ RC SysFuncExpr::get_func_data_format_value(const Tuple &tuple, Value &value) con
           result_date_str += cell_format_chars[i];
           break;
         }
-      } // end switch
+      }
     } else if (cell_format_chars[i] != '%') {
       result_date_str += cell_format_chars[i];
     }
