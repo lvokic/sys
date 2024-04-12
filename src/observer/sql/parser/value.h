@@ -39,6 +39,8 @@ enum AttrType
 // CHARS..DATES 是字段类型，FieldMeta 会进行检查
 // 所有都是值类型，BOOLEANS 是内部值类型
 
+static int ATTR_TYPE_LENGTH[] = {-1, 4, 4, 4, 8, 4, 8, MAX_TEXT_LENGTH, 4, -1};
+
 const char *attr_type_to_string(AttrType type);
 AttrType attr_type_from_string(const char *s);
 
