@@ -558,6 +558,7 @@ RC SysFuncExpr::get_func_round_value(const Tuple &tuple, Value &value) const
     };
     *(uint32_t*)&cell_float += 1;
     cell_float = inner_round(cell_float, cell_precision);
+    value.set_float(cell_float);
   } else {
     auto& param_expr = *params_.begin();
     Value param_expr_cell;
