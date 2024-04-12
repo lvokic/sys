@@ -32,3 +32,19 @@ INSERT INTO date_table VALUES (10,'2017-2-29');
 INSERT INTO date_table VALUES (11,'2017-21-29');
 INSERT INTO date_table VALUES (12,'2017-12-32');
 INSERT INTO date_table VALUES (13,'2017-11-31');
+
+
+CREATE TABLE function_table(id int, name char(20), score float, u_date date);
+select id, length(name) from function_table where id>7;
++ 2 | 18
++ 3 | 9
++ 4 | 18
++ 5 | 5
++ 7 | 6
+
+CREATE TABLE function_table(id int, name char(20), score float, u_date date);
+CREATE TABLE function_table_2(id int, name char(30), score float, u_date date);
+insert into function_table VALUES (3, 'ELM9SWF5A', 1.89, '2024-09-20');
+insert into function_table VALUES (4, '2X75UMV0UWX0A8KKLN', 6.65, '2021-06-26');
+insert into function_table VALUES (2, 'W0MYWSR0AKRPOP5HR0', 7.01, '2018-08-17');
+...

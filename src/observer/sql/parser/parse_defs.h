@@ -33,6 +33,15 @@ typedef enum
   AGG_COUNT,
   AGGR_FUNC_TYPE_NUM
 } AggrFuncType;
+
+typedef enum
+{
+  SYS_FUNC_LENGTH,
+  SYS_FUNC_ROUND,
+  SYS_FUNC_DATE_FORMAT,
+  SYS_FUNC_TYPE_NUM
+} SysFuncType;
+
 /**
  * @defgroup SQLParser SQL Parser 
  */
@@ -96,8 +105,8 @@ struct GroupBySqlNode
  */
 struct InnerJoinSqlNode
 {
-  std::string base_relation;
-  std::vector<std::string> join_relations;
+  std::pair<std::string, std::string> base_relation;
+  std::vector<std::pair<std::string, std::string>> join_relations;
   std::vector<std::vector<ConditionSqlNode>> conditions;
 };
 
