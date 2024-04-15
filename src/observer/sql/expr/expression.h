@@ -729,18 +729,19 @@ private:
 class SelectStmt;
 class LogicalOperator;
 class PhysicalOperator;
-class SubQueryExpr : public Expression {
+class SubQueryExpr : public Expression
+{
 public:
   SubQueryExpr(const SelectSqlNode& sql_node);
   virtual ~SubQueryExpr();
 
   RC open(Trx* trx);
   RC close();
-  bool has_more_row(const Tuple& tuple) const;
+  bool has_more_row(const Tuple &tuple) const;
 
-  RC get_value(const Tuple& tuple, Value& value) const;
+  RC get_value(const Tuple &tuple, Value &value) const;
 
-  RC try_get_value(Value& value) const;
+  RC try_get_value(Value &value) const;
 
   ExprType type() const;
 
@@ -763,7 +764,8 @@ private:
   std::unique_ptr<PhysicalOperator> physical_oper_;
 };
 
-class ExprListExpr : public Expression {
+class ExprListExpr : public Expression
+{
 public:
   ExprListExpr(std::vector<Expression*>&& exprs) {
     for (auto expr : exprs) {
@@ -778,8 +780,8 @@ public:
   {
     cur_idx_ = 0;
   }
-  
-  RC get_value(const Tuple& tuple, Value& value) const override
+
+  RC get_value(const Tuple &tuple, Value &value) const override
   {
     if (cur_idx_ >= exprs_.size()) {
       return RC::RECORD_EOF;
@@ -787,7 +789,10 @@ public:
     return exprs_[const_cast<int&>(cur_idx_)++]->get_value(tuple, value);
   }
 
+  RC try_get_value(Value &value) const override { return RC::UNIMPLENMENT; }
+
   ExprType type() const override { return ExprType::EXPRLIST; }
+
   AttrType value_type() const override { return UNDEFINED; }
 
   void traverse(const std::function<void(Expression*)>& func, const std::function<bool(Expression*)>& filter) override
@@ -825,7 +830,6 @@ public:
     new_expr->set_alias(alias());
     return new_expr;
   }
-
 private:
   int cur_idx_ = 0;
   std::vector<std::unique_ptr<Expression>> exprs_;
