@@ -691,14 +691,8 @@ update_kv:
     {
       $$ = new UpdateKV;
       $$->attr_name = $1;
-      Value tmp;
-      if (!exp2value($3, tmp)) {
-        yyerror(&@$, sql_string, sql_result, scanner, "Exp Can Not As Value!");
-        YYERROR;
-      }
-      $$->value = tmp;
+      $$->value = $3;
       free($1);
-      delete $3;
     }
     ;
 
