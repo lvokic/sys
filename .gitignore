@@ -24,4 +24,5 @@ GPATH
 GTAGS
 docs/book
 deps/3rd
+build.sh
 #*#

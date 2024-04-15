@@ -98,29 +98,31 @@ extern int yydebug;
     INNER = 299,                   /* INNER  */
     JOIN = 300,                    /* JOIN  */
     AS = 301,                      /* AS  */
-    EQ = 302,                      /* EQ  */
-    LT = 303,                      /* LT  */
-    GT = 304,                      /* GT  */
-    LE = 305,                      /* LE  */
-    GE = 306,                      /* GE  */
-    NE = 307,                      /* NE  */
-    NOT = 308,                     /* NOT  */
-    LIKE = 309,                    /* LIKE  */
-    UNIQUE = 310,                  /* UNIQUE  */
-    AGGR_MAX = 311,                /* AGGR_MAX  */
-    AGGR_MIN = 312,                /* AGGR_MIN  */
-    AGGR_SUM = 313,                /* AGGR_SUM  */
-    AGGR_AVG = 314,                /* AGGR_AVG  */
-    AGGR_COUNT = 315,              /* AGGR_COUNT  */
-    LENGTH = 316,                  /* LENGTH  */
-    ROUND = 317,                   /* ROUND  */
-    DATE_FORMAT = 318,             /* DATE_FORMAT  */
-    NUMBER = 319,                  /* NUMBER  */
-    FLOAT = 320,                   /* FLOAT  */
-    ID = 321,                      /* ID  */
-    SSS = 322,                     /* SSS  */
-    DATE_STR = 323,                /* DATE_STR  */
-    UMINUS = 324                   /* UMINUS  */
+    IN = 302,                      /* IN  */
+    EXISTS = 303,                  /* EXISTS  */
+    EQ = 304,                      /* EQ  */
+    LT = 305,                      /* LT  */
+    GT = 306,                      /* GT  */
+    LE = 307,                      /* LE  */
+    GE = 308,                      /* GE  */
+    NE = 309,                      /* NE  */
+    NOT = 310,                     /* NOT  */
+    LIKE = 311,                    /* LIKE  */
+    UNIQUE = 312,                  /* UNIQUE  */
+    AGGR_MAX = 313,                /* AGGR_MAX  */
+    AGGR_MIN = 314,                /* AGGR_MIN  */
+    AGGR_SUM = 315,                /* AGGR_SUM  */
+    AGGR_AVG = 316,                /* AGGR_AVG  */
+    AGGR_COUNT = 317,              /* AGGR_COUNT  */
+    LENGTH = 318,                  /* LENGTH  */
+    ROUND = 319,                   /* ROUND  */
+    DATE_FORMAT = 320,             /* DATE_FORMAT  */
+    NUMBER = 321,                  /* NUMBER  */
+    FLOAT = 322,                   /* FLOAT  */
+    ID = 323,                      /* ID  */
+    SSS = 324,                     /* SSS  */
+    DATE_STR = 325,                /* DATE_STR  */
+    UMINUS = 326                   /* UMINUS  */
   };
   typedef enum yytokentype yytoken_kind_t;
 #endif
@@ -129,7 +131,7 @@ extern int yydebug;
 #if ! defined YYSTYPE && ! defined YYSTYPE_IS_DECLARED
 union YYSTYPE
 {
-#line 143 "yacc_sql.y"
+#line 145 "yacc_sql.y"
 
   ParsedSqlNode *                   sql_node;
   ConditionSqlNode *                condition;
@@ -154,7 +156,7 @@ union YYSTYPE
   float                             floats;
   bool                              boolean;
 
-#line 158 "yacc_sql.hpp"
+#line 160 "yacc_sql.hpp"
 
 };
 typedef union YYSTYPE YYSTYPE;
