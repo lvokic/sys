@@ -47,6 +47,7 @@ RC UpdatePhysicalOperator::open(Trx *trx)
 
 RC UpdatePhysicalOperator::find_target_columns()
 {
+  // 如果字段检查失败 并不停止执行 只是打个标志 因为如果更新 0 行必然返回成功
   RC rc = RC::SUCCESS;
   const int sys_field_num  = table_->table_meta().sys_field_num();
   const int user_field_num = table_->table_meta().field_num() - sys_field_num;
@@ -62,45 +63,43 @@ RC UpdatePhysicalOperator::find_target_columns()
       if (0 != strcmp(field_name, attr_name.c_str())) {
         continue;
       }
-      
       std::unique_ptr<Expression>& expr = values_[c_idx];
+
       Value raw_value;
       if (expr->type() == ExprType::SUBQUERY) {
-        SubQueryExpr* sub_query_expr = static_cast<SubQueryExpr*>(expr.get());
-        if (rc = sub_query_expr->open(nullptr); RC::SUCCESS != rc) {
+        SubQueryExpr* subquery_expr = static_cast<SubQueryExpr*>(expr.get());
+        if (rc = subquery_expr->open(nullptr); RC::SUCCESS != rc) { // 暂时先 nullptr
           return rc;
         }
-        rc = sub_query_expr->get_value(tp, raw_value);
+        rc = subquery_expr->get_value(tp, raw_value);
         if (RC::RECORD_EOF == rc) {
+          // 子查询为空集时设置 null
           raw_value.set_null();
           rc = RC::SUCCESS;
         } else if (RC::SUCCESS != rc) {
           return rc;
-        } else if (sub_query_expr->has_more_row(tp)) {
+        } else if (subquery_expr->has_more_row(tp)) {
           // 子查询为多行 打个标志 直接跳过后续检查
           invalid_ = true;
           break;
         }
-        sub_query_expr->close();
+        subquery_expr->close();
       } else {
         if (rc = expr->get_value(tp, raw_value); RC::SUCCESS != rc) {
           return rc;
         }
       }
-
+      // 拿到 Raw Value
       // 判断 类型是否符合要求
       if (raw_value.is_null() && field_meta->nullable()) {
         // ok
       } else if (raw_value.attr_type() != field_meta->type()) {
         if (TEXTS == field_meta->type() && CHARS == raw_value.attr_type()) {
-          // do nothing
-        } else {
-          if (const_cast<Value &>(raw_value).typecast(field_meta->type()) != RC::SUCCESS) {
-            LOG_WARN("field type mismatch. table=%s, field=%s, field type=%d, value_type=%d",
+        } else if (const_cast<Value&>(raw_value).typecast(field_meta->type()) != RC::SUCCESS) {
+          LOG_WARN("field type mismatch. table=%s, field=%s, field type=%d, value_type=%d",
                   table_->name(), fields_[c_idx].c_str(), field_meta->type(), raw_value.attr_type());
-            // return RC::SCHEMA_FIELD_TYPE_MISMATCH;
-            invalid_ = true;
-          }
+          // return RC::SCHEMA_FIELD_TYPE_MISMATCH;
+          invalid_ = true;
         }
       }
 
@@ -128,6 +127,7 @@ RC UpdatePhysicalOperator::next()
     if (invalid_) { // 子查询结果为多行
       return RC::INVALID_ARGUMENT;
     }
+
     Tuple *tuple = child->current_tuple();
     if (nullptr == tuple) {
       LOG_WARN("failed to get current record: %s", strrc(rc));
@@ -141,7 +141,6 @@ RC UpdatePhysicalOperator::next()
 
     // 如果更新前后record不变，则跳过这一行
     RC rc2 = RC::SUCCESS;
-    // 找到匹配的一行为 new_record 赋值并且存储匹配的 old_record
     if (RC::SUCCESS != (rc2 = construct_new_record(record, new_record))) {
       if (RC::RECORD_DUPLICATE_KEY == rc2) { 
         continue;
@@ -254,8 +253,10 @@ RC UpdatePhysicalOperator::construct_old_record(Record &updated_record, Record &
   memcpy(tmp_record_data_, updated_record.data(), table_->table_meta().record_size());
 
   std::vector<Value> &old_value = old_values_.back();
+  int val_idx = 0;
   for (size_t c_idx = 0; c_idx < fields_.size(); c_idx++) {
-    Value *value = &old_value[c_idx];
+    Value *value = &old_value[val_idx++];
+    FieldMeta &field_meta = fields_meta_[c_idx];
 
     // 将旧值复制到 old_record 里
     const FieldMeta* null_field = table_->table_meta().null_field();
@@ -268,7 +269,13 @@ RC UpdatePhysicalOperator::construct_old_record(Record &updated_record, Record &
     } else {
       // 旧值不是NULL
       old_null_bitmap.clear_bit(fields_id_[c_idx]);
-      memcpy(tmp_record_data_ + fields_meta_[c_idx].offset(), value->data(), fields_meta_[c_idx].len());
+      if (TEXTS == field_meta.type()) {
+        memcpy(tmp_record_data_ + field_meta.offset(), value->data(), sizeof(int64_t));
+        value = &old_value[val_idx++];
+        memcpy(tmp_record_data_ + field_meta.offset() + sizeof(int64_t), value->data(), sizeof(int64_t));        
+      } else {
+        memcpy(tmp_record_data_ + field_meta.offset(), value->data(), field_meta.len());
+      }
     }
   }
   

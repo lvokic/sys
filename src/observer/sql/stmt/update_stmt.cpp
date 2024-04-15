@@ -20,7 +20,8 @@ See the Mulan PSL v2 for more details. */
 
 UpdateStmt::UpdateStmt(Table *table, std::vector<FieldMeta> fields, std::vector<std::unique_ptr<Expression>>&& values, FilterStmt *filter_stmt)
   : table_(table), fields_(std::move(fields)), values_(std::move(values)), filter_stmt_(filter_stmt)
-{}
+{
+}
 
 UpdateStmt::~UpdateStmt()
 {
@@ -48,15 +49,15 @@ RC UpdateStmt::create(Db *db, UpdateSqlNode &update, Stmt *&stmt)
     return RC::SCHEMA_TABLE_NOT_EXIST;
   }
 
-  auto check_field = [&db](Expression* expr) {
+  auto check_field = [&db](Expression *expr) {
     if (expr->type() == ExprType::SYSFUNCTION) {
       return RC::INTERNAL;
     }
     if (expr->type() == ExprType::SUBQUERY) {
-      // 条件表达式里才会有子查询
-      SubQueryExpr* sub_query_expr = static_cast<SubQueryExpr*>(expr);
+      // 条件表达式里才有子查询
+      SubQueryExpr* subquery_expr = static_cast<SubQueryExpr*>(expr);
       Stmt * select_stmt = nullptr;
-      if (RC rc = SelectStmt::create(db, *sub_query_expr->get_sql_node(), select_stmt, {}); RC::SUCCESS != rc) {
+      if (RC rc = SelectStmt::create(db, *subquery_expr->get_sql_node(), select_stmt, {}); RC::SUCCESS != rc) {
         return rc;
       }
       if (select_stmt->type() != StmtType::SELECT) {
@@ -66,12 +67,11 @@ RC UpdateStmt::create(Db *db, UpdateSqlNode &update, Stmt *&stmt)
       if (ss->projects().size() > 1) {
         return RC::INVALID_ARGUMENT;
       }
-      sub_query_expr->set_select_stmt(static_cast<SelectStmt*>(select_stmt));
+      subquery_expr->set_select_stmt(static_cast<SelectStmt*>(select_stmt));
       return RC::SUCCESS;
     }
     return RC::SUCCESS;
   };
-
   // check fields type
   // update t1 set c1 = 1;
   //1.检查 表t1 有没有c1 列
