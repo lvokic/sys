@@ -227,11 +227,6 @@ public:
   double get_double() const;
   int64_t get_long() const;
 
-  /**
-   * 语法分析层面是否可以将from转换为to
-   */
-  static bool convert(AttrType from, AttrType to, Value &value);
-
 private:
   AttrType attr_type_ = UNDEFINED;
   int length_ = 0;

@@ -30,7 +30,10 @@ RC IndexScanPhysicalOperator::make_data(const std::vector<Value> &values, std::v
   char *beg = ret.data();
   for (int i = 0; i < values.size() && i < meta.size(); i++) {
     Value &value = const_cast<Value &>(values[i]);
-    Value::convert(value.attr_type(), meta[i].type(), value);
+    if (const_cast<Value&>(values[i]).typecast(meta[i].type()) != RC::SUCCESS) {
+      LOG_WARN("field type mismatch.");
+      return RC::SCHEMA_FIELD_TYPE_MISMATCH;
+    }
     memcpy(beg, value.data(), meta[i].len());
     beg += meta[i].len();
   }

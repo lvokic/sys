@@ -314,17 +314,17 @@ unique_ptr<PredicateLogicalOperator> cmp_exprs2predicate_logical_oper(std::vecto
   return {};
 }
 
-RC LogicalPlanGenerator::create_plan(FilterStmt *filter_stmt, unique_ptr<LogicalOperator> &logical_operator)
+RC LogicalPlanGenerator::create_plan(
+    FilterStmt *filter_stmt, unique_ptr<LogicalOperator> &logical_operator)
 {
   if (filter_stmt == nullptr || filter_stmt->condition() == nullptr) {
     return {};
   }
   std::vector<unique_ptr<Expression>> cmp_exprs;
   // 给子查询生成 logical oper
-  auto process_sub_query = [](Expression *expr) {
+  auto process_sub_query = [](Expression* expr) {
     if (expr->type() == ExprType::SUBQUERY) {
-      SubQueryExpr                    *sub_query_expr = static_cast<SubQueryExpr *>(expr);
-      std::unique_ptr<LogicalOperator> sub_query_logi_oper;
+      SubQueryExpr* sub_query_expr = static_cast<SubQueryExpr*>(expr);
       return sub_query_expr->generate_logical_oper();
     }
     return RC::SUCCESS;
@@ -332,7 +332,6 @@ RC LogicalPlanGenerator::create_plan(FilterStmt *filter_stmt, unique_ptr<Logical
   if (RC rc = filter_stmt->condition()->traverse_check(process_sub_query); OB_FAIL(rc)) {
     return rc;
   }
-
   cmp_exprs.emplace_back(std::move(filter_stmt->condition()));
   logical_operator = cmp_exprs2predicate_logical_oper(std::move(cmp_exprs));
   return RC::SUCCESS;

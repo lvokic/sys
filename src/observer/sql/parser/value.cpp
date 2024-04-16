@@ -61,7 +61,6 @@ Value::Value(int64_t val)
 {
   set_long(val);
 }
-
 Value::Value(const char *s, int len /*= 0*/)
 {
   set_string(s, len);
@@ -290,7 +289,7 @@ int Value::compare(const Value &other) const
 
 int Value::get_int() const
 {
-  // ASSERT(attr_type_ != DATES,"date can not get_int()");
+  //ASSERT(attr_type_ != DATES,"date can not get_int()"); date_format 需要调用 get_int()
   switch (attr_type_) {
     case CHARS: {
       try {
@@ -300,7 +299,7 @@ int Value::get_int() const
         return 0;
       }
     }
-    case INTS: 
+    case INTS:
     case DATES: {
       return num_value_.int_value_;
     }
@@ -353,6 +352,7 @@ float Value::get_float() const
   return 0;
 }
 
+
 double Value::get_double() const
 {
   ASSERT(attr_type_ != DATES,"date can not get_double()");
@@ -389,6 +389,7 @@ int64_t Value::get_long() const
 {
   return num_value_.long_;
 }
+
 
 std::string Value::get_string() const
 {
@@ -462,7 +463,7 @@ const Value Value::add(const Value &left, const Value &right)
     return result_cell;
   }
   if (left.attr_type() == INTS && right.attr_type() == INTS) {
-    int result = left.get_int() + right.get_int();
+    int result = left.get_int()+right.get_int();
     result_cell.set_int(result);
   } else {
     double tmp_left = left.get_double();
@@ -490,47 +491,4 @@ const Value Value::div(const Value &left, const Value &right)
     result_cell.set_double(result);
   }
   return result_cell;
-}
-
-bool Value::convert(AttrType from, AttrType to, Value &value)
-{
-  if (from == to) {
-    return true;
-  }
-  if (from == CHARS) {
-    if (to == INTS) {
-      value.set_int(value.get_int());
-      return true;
-    } else if (to == FLOATS) {
-      value.set_float(value.get_float());
-      return true;
-    } else if (to == DATES) {
-      value.set_date(value.get_int());
-      return true;
-    } else if (to == TEXTS) {
-      if (MAX_TEXT_LENGTH < value.length()) {
-        return false;
-      }
-      return true;
-    }
-  }
-  if (to == CHARS) {
-    if (from == NULLS)
-      return false;
-    value.set_string(value.to_string().c_str());
-    return true;
-  }
-  if (from == INTS && to == FLOATS) {
-    value.set_float(value.get_float());
-    return true;
-  }
-  if (from == FLOATS && to == INTS) {
-    value.set_int(value.get_int());
-    return true;
-  }
-  if (to == NULLS) {
-    value.set_null();
-    return true;
-  }
-  return false;
 }

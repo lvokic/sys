@@ -119,7 +119,6 @@ RC PhysicalPlanGenerator::create_plan(TableGetLogicalOperator &table_get_oper, u
   auto process_subquery = [](Expression* expr) {
     if (expr->type() == ExprType::SUBQUERY) {
       SubQueryExpr* sub_query_expr = static_cast<SubQueryExpr*>(expr);
-      std::unique_ptr<PhysicalOperator> sub_query_phy_oper;
       sub_query_expr->generate_physical_oper();
     }
     return RC::SUCCESS;
