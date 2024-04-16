@@ -50,6 +50,7 @@ enum class PhysicalOperatorType
   INSERT,
   UPDATE,
   GROUPBY,
+  ORDERBY,
   DUAL_TABLE_SCAN,
 };
 

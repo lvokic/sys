@@ -39,6 +39,8 @@ See the Mulan PSL v2 for more details. */
 #include "sql/operator/create_table_physical_operator.h"
 #include "sql/operator/groupby_logical_operator.h"
 #include "sql/operator/groupby_physical_operator.h"
+#include "sql/operator/orderby_logical_operator.h"
+#include "sql/operator/orderby_physical_operator.h"
 #include "storage/index/index.h"
 #include "sql/expr/expression.h"
 #include "common/log/log.h"
@@ -72,6 +74,10 @@ RC PhysicalPlanGenerator::create(LogicalOperator &logical_operator, unique_ptr<P
 
     case LogicalOperatorType::GROUPBY: {
       return create_plan(static_cast<GroupByLogicalOperator &>(logical_operator), oper);
+    } break;
+
+    case LogicalOperatorType::ORDERBY: {
+      return create_plan(static_cast<OrderByLogicalOperator &>(logical_operator), oper);
     } break;
 
     case LogicalOperatorType::INSERT: {
@@ -110,14 +116,11 @@ RC PhysicalPlanGenerator::create_plan(TableGetLogicalOperator &table_get_oper, u
   Index *index = nullptr;
   std::vector<std::pair<Field, Value>> field_values;
 
-  auto process_subquery = [this](Expression* expr) {
+  auto process_subquery = [](Expression* expr) {
     if (expr->type() == ExprType::SUBQUERY) {
       SubQueryExpr* sub_query_expr = static_cast<SubQueryExpr*>(expr);
       std::unique_ptr<PhysicalOperator> sub_query_phy_oper;
-      if (RC rc = create(*sub_query_expr->get_logical_oper().get(), sub_query_phy_oper); RC::SUCCESS != rc) {
-        return rc;
-      }
-      sub_query_expr->set_physical_oper(std::move(sub_query_phy_oper));
+      sub_query_expr->generate_physical_oper();
     }
     return RC::SUCCESS;
   };
@@ -222,14 +225,10 @@ RC PhysicalPlanGenerator::create_plan(PredicateLogicalOperator &pred_oper, uniqu
   ASSERT(expressions.size() == 1, "predicate logical operator's children should be 1");
 
   unique_ptr<Expression> expression = std::move(expressions.front());
-  rc = expression->traverse_check([this](Expression* expr) {
+  rc = expression->traverse_check([](Expression* expr) {
     if (expr->type() == ExprType::SUBQUERY) {
       SubQueryExpr* sub_query_expr = static_cast<SubQueryExpr*>(expr);
-      std::unique_ptr<PhysicalOperator> sub_query_phy_oper;
-      if (RC rc = create(*sub_query_expr->get_logical_oper().get(), sub_query_phy_oper); RC::SUCCESS != rc) {
-        return rc;
-      }
-      sub_query_expr->set_physical_oper(std::move(sub_query_phy_oper));
+      return sub_query_expr->generate_physical_oper();
     }
     return RC::SUCCESS;
   });
@@ -301,6 +300,34 @@ RC PhysicalPlanGenerator::create_plan(GroupByLogicalOperator &groupby_oper, uniq
   return rc;
 }
 
+RC PhysicalPlanGenerator::create_plan(OrderByLogicalOperator &orderby_oper, unique_ptr<PhysicalOperator> &oper)
+{
+  vector<unique_ptr<LogicalOperator>> &child_opers = orderby_oper.children();
+  unique_ptr<PhysicalOperator> child_phy_oper;
+
+  RC rc = RC::SUCCESS;
+  if (!child_opers.empty()) {
+    LogicalOperator *child_oper = child_opers.front().get();
+    rc = create(*child_oper, child_phy_oper);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to create orderby logical operator's child physical operator. rc=%s", strrc(rc));
+      return rc;
+    }
+  }
+
+  OrderByPhysicalOperator *orderby_operator = new OrderByPhysicalOperator(
+      std::move(orderby_oper.orderby_units()),
+      std::move(orderby_oper.exprs()));
+  if (child_phy_oper) {
+    orderby_operator->add_child(std::move(child_phy_oper));
+  }
+
+  oper = unique_ptr<PhysicalOperator>(orderby_operator);
+
+  LOG_TRACE("create a orderby physical operator");
+  return rc;
+}
+
 RC PhysicalPlanGenerator::create_plan(InsertLogicalOperator &insert_oper, unique_ptr<PhysicalOperator> &oper)
 {
   Table *table = insert_oper.table();
@@ -351,14 +378,10 @@ RC PhysicalPlanGenerator::create_plan(UpdateLogicalOperator &update_oper, unique
   }
 
   for (auto& value : update_oper.values()) {
-    rc = value->traverse_check([this](Expression* expr) {
+    rc = value->traverse_check([](Expression* expr) {
       if (expr->type() == ExprType::SUBQUERY) {
         SubQueryExpr* sub_query_expr = static_cast<SubQueryExpr*>(expr);
-        std::unique_ptr<PhysicalOperator> sub_query_phy_oper;
-        if (RC rc = create(*sub_query_expr->get_logical_oper().get(), sub_query_phy_oper); RC::SUCCESS != rc) {
-          return rc;
-        }
-        sub_query_expr->set_physical_oper(std::move(sub_query_phy_oper));
+        sub_query_expr->generate_physical_oper();
       }
       return RC::SUCCESS;
     });

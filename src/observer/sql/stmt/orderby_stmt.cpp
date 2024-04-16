@@ -15,29 +15,28 @@ See the Mulan PSL v2 for more details. */
 #include "common/rc.h"
 #include "common/log/log.h"
 #include "common/lang/string.h"
-#include "sql/stmt/groupby_stmt.h"
+#include "sql/stmt/orderby_stmt.h"
 #include "storage/db/db.h"
 #include "storage/table/table.h"
 #include "sql/stmt/filter_stmt.h"
 
-RC GroupByStmt::create(Db *db, Table *default_table, std::unordered_map<std::string, Table *> *tables,
-    const std::vector<Expression*>& groupby_expr, GroupByStmt *&stmt,
-    std::vector<std::unique_ptr<AggrFuncExpr>> &&agg_exprs,
-    std::vector<std::unique_ptr<FieldExpr>> &&field_exprs)
+RC OrderByStmt::create(Db *db, Table *default_table, std::unordered_map<std::string, Table *> *tables,
+      const std::vector<OrderBySqlNode> &orderby_sql_nodes, OrderByStmt *&stmt,
+      std::vector<std::unique_ptr<Expression>> &&exprs)
 {
   RC rc = RC::SUCCESS;
   stmt = nullptr;
 
-  std::vector<std::unique_ptr<Expression>> groupby_fields;
-  for(auto expr : groupby_expr)
+  std::vector<std::unique_ptr<OrderByUnit >> tmp_units;
+  
+  for(auto &node : orderby_sql_nodes)
   {
-    groupby_fields.emplace_back(expr);
+    tmp_units.emplace_back(std::make_unique<OrderByUnit>(node.expr,node.is_asc));//这里 order by unit 中的指针是独享的
   }
-
   // everything alright
-  stmt = new GroupByStmt();
-  stmt->set_agg_exprs(std::move(agg_exprs));
-  stmt->set_field_exprs(std::move(field_exprs));
-  stmt->set_groupby_fields(std::move(groupby_fields));
+  stmt = new OrderByStmt();
+  stmt->set_orderby_units(std::move(tmp_units));
+  stmt->set_exprs(std::move(exprs));
+
   return rc;
 }

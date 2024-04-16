@@ -22,6 +22,8 @@ See the Mulan PSL v2 for more details. */
 #include "sql/stmt/select_stmt.h"
 #include "sql/operator/logical_operator.h"
 #include "sql/operator/physical_operator.h"
+#include "sql/optimizer/logical_plan_generator.h"
+#include "sql/optimizer/physical_plan_generator.h"
 
 using namespace std;
 
@@ -41,7 +43,13 @@ std::string month_name[] = {"",
 
 RC FieldExpr::get_value(const Tuple &tuple, Value &value) const
 {
-  return tuple.find_cell(TupleCellSpec(table_name(), field_name()), value);
+  if (is_first_) {
+    bool &is_first_ref = const_cast<bool&>(is_first_);
+    is_first_ref = false;
+    return tuple.find_cell(TupleCellSpec(table_name(), field_name()), value, const_cast<int&>(index_));
+  } else {
+    return tuple.cell_at(index_, value);
+  }
 }
 
 RC ValueExpr::get_value(const Tuple &tuple, Value &value) const
@@ -123,6 +131,10 @@ static bool str_like(const Value &left, const Value &right)
 
 ComparisonExpr::ComparisonExpr(CompOp comp, unique_ptr<Expression> left, unique_ptr<Expression> right)
     : comp_(comp), left_(std::move(left)), right_(std::move(right))
+{}
+
+ComparisonExpr::ComparisonExpr(CompOp comp, Expression* left, Expression* right)
+    : comp_(comp), left_(left), right_(right)
 {}
 
 ComparisonExpr::~ComparisonExpr()
@@ -238,7 +250,15 @@ RC ComparisonExpr::get_value(const Tuple &tuple, Value &value) const
     return RC::RECORD_EOF == rc ? RC::SUCCESS : rc;
   }
 
-  rc = left_->get_value(tuple, left_value);
+  auto get_value = [&tuple](const std::unique_ptr<Expression>& expr, Value& value) {
+    RC rc = expr->get_value(tuple, value);
+    if (expr->type() == ExprType::SUBQUERY && RC::RECORD_EOF == rc) {
+      value.set_null();
+      rc = RC::SUCCESS;
+    }
+    return rc;
+  };
+  rc = get_value(left_, left_value);
   if (rc != RC::SUCCESS) {
     LOG_WARN("failed to get value of left expression. rc=%s", strrc(rc));
     return rc;
@@ -268,7 +288,7 @@ RC ComparisonExpr::get_value(const Tuple &tuple, Value &value) const
     return rc == RC::RECORD_EOF ? RC::SUCCESS : rc;
   }
 
-  rc = right_->get_value(tuple, right_value);
+  rc = get_value(right_, right_value);
   if (rc != RC::SUCCESS) {
     LOG_WARN("failed to get value of right expression. rc=%s", strrc(rc));
     return rc;
@@ -289,6 +309,13 @@ RC ComparisonExpr::get_value(const Tuple &tuple, Value &value) const
 ConjunctionExpr::ConjunctionExpr(Type type, vector<unique_ptr<Expression>> children)
     : conjunction_type_(type), children_(std::move(children))
 {}
+
+ConjunctionExpr::ConjunctionExpr(Type type, Expression* left, Expression* right)
+    : conjunction_type_(type)
+{
+  children_.emplace_back(left);
+  children_.emplace_back(right);
+}
 
 RC ConjunctionExpr::get_value(const Tuple &tuple, Value &value) const
 {
@@ -584,8 +611,18 @@ AttrType AggrFuncExpr::value_type() const
 RC AggrFuncExpr::get_value(const Tuple &tuple, Value &cell) const
 {
   TupleCellSpec spec(name().c_str());
+  //int index = 0;
   // spec.set_agg_type(get_aggr_func_type());
-  return tuple.find_cell(spec,cell);
+  if(is_first_)
+  {
+    bool & is_first_ref = const_cast<bool&>(is_first_);
+    is_first_ref = false;
+    return tuple.find_cell(spec,cell,const_cast<int&>(index_));
+  }
+  else
+  {
+    return tuple.cell_at(index_,cell);
+  }
 }
 
 RC SysFuncExpr::get_func_length_value(const Tuple &tuple, Value &value) const
@@ -797,6 +834,40 @@ SubQueryExpr::SubQueryExpr(const SelectSqlNode& sql_node)
   sql_node_ = std::make_unique<SelectSqlNode>(sql_node);
 }
 
+RC SubQueryExpr::generate_select_stmt(Db* db, const std::unordered_map<std::string, Table *> &tables)
+{
+  Stmt* select_stmt = nullptr;
+  if (RC rc = SelectStmt::create(db, *sql_node_.get(), select_stmt, tables); RC::SUCCESS != rc) {
+    return rc;
+  }
+  if (select_stmt->type() != StmtType::SELECT) {
+    return RC::INVALID_ARGUMENT;
+  }
+  SelectStmt* ss = static_cast<SelectStmt*>(select_stmt);
+  if (ss->projects().size() > 1) {
+    return RC::INVALID_ARGUMENT;
+  }
+  stmt_ = std::unique_ptr<SelectStmt>(ss);
+  return RC::SUCCESS;
+}
+
+RC SubQueryExpr::generate_logical_oper()
+{
+  if (RC rc = LogicalPlanGenerator::create(stmt_.get(), logical_oper_); OB_FAIL(rc)) {
+    LOG_WARN("subquery logical oper generate failed. return %s", strrc(rc));
+    return rc;
+  }
+  return RC::SUCCESS;
+}
+RC SubQueryExpr::generate_physical_oper()
+{
+  if (RC rc = PhysicalPlanGenerator::create(*logical_oper_, physical_oper_); OB_FAIL(rc)) {
+    LOG_WARN("subquery physical oper generate failed. return %s", strrc(rc));
+    return rc;
+  }
+  return RC::SUCCESS;
+}
+
 SubQueryExpr::~SubQueryExpr() = default;
 
 RC SubQueryExpr::open(Trx* trx) 
@@ -844,39 +915,4 @@ AttrType SubQueryExpr::value_type() const
 std::unique_ptr<Expression> SubQueryExpr::deep_copy() const 
 { 
   return {}; 
-}
-
-const std::unique_ptr<SelectSqlNode>& SubQueryExpr::get_sql_node() const
-{
-  return sql_node_;
-}
-
-void SubQueryExpr::set_select_stmt(SelectStmt* stmt)
-{
-  stmt_ = std::unique_ptr<SelectStmt>(stmt);
-}
-
-const std::unique_ptr<SelectStmt>& SubQueryExpr::get_select_stmt() const
-{
-  return stmt_;
-}
-
-void SubQueryExpr::set_logical_oper(std::unique_ptr<LogicalOperator>&& oper)
-{
-  logical_oper_ = std::move(oper);
-}
-
-const std::unique_ptr<LogicalOperator>& SubQueryExpr::get_logical_oper()
-{
-  return logical_oper_;
-}
-
-void SubQueryExpr::set_physical_oper(std::unique_ptr<PhysicalOperator>&& oper)
-{
-  physical_oper_ = std::move(oper);
-}
-
-const std::unique_ptr<PhysicalOperator>& SubQueryExpr::get_physical_oper()
-{
-  return physical_oper_;
 }
