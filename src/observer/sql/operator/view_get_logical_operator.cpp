@@ -9,12 +9,16 @@ MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 See the Mulan PSL v2 for more details. */
 
 //
-// Created by WangYunlai on 2023/4/25.
+// Created by Wangyunlai on 2022/12/07
 //
 
-#include "sql/operator/insert_logical_operator.h"
+#include "sql/operator/view_get_logical_operator.h"
 
-InsertLogicalOperator::InsertLogicalOperator(BaseTable *table, std::vector<std::vector<Value>> values)
-    : table_(table), values_(std::move(values))
+ViewGetLogicalOperator::ViewGetLogicalOperator(View *table, const std::vector<Field> &fields, bool readonly)
+    : table_(table), fields_(fields), readonly_(readonly)
+{}
+
+void ViewGetLogicalOperator::set_predicates(std::vector<std::unique_ptr<Expression>> &&exprs)
 {
+  predicates_ = std::move(exprs);
 }

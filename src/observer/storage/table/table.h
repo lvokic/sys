@@ -15,6 +15,7 @@ See the Mulan PSL v2 for more details. */
 #pragma once
 
 #include <functional>
+#include "storage/table/base_table.h"
 #include "storage/table/table_meta.h"
 
 struct RID;
@@ -33,7 +34,7 @@ class Trx;
  * @brief 表
  * 
  */
-class Table 
+class Table : public BaseTable
 {
 public:
   Table() = default;
@@ -102,11 +103,15 @@ public:
   RC read_text(int64_t offset, int64_t length, char *data) const;
 
 public:
-  int32_t table_id() const { return table_meta_.table_id(); }
-  const char *name() const;
-
-  const TableMeta &table_meta() const;
+  virtual int32_t table_id() const { return table_meta_.table_id(); }
+  virtual const char *name() const;
+  virtual const TableMeta &table_meta() const;
   TableMeta &table_meta();
+  
+  const std::vector<Index *> &indexes() const
+  {
+    return indexes_;
+  }
 
   RC sync();
   RC drop(const char *dir);

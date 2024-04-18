@@ -491,14 +491,14 @@ RC ArithmeticExpr::try_get_value(Value &value) const
 
 //检查表达式中出现的 表,列 是否存在
 // NOTE: 是针对 projects 中的 FieldExpr 写的 conditions 中的也可以用 但是处理之后的 name alias 是无效的
-RC FieldExpr::check_field(const std::unordered_map<std::string, Table *> &table_map,
-  const std::vector<Table *> &tables, Table* default_table,
+RC FieldExpr::check_field(const std::unordered_map<std::string, BaseTable *> &table_map,
+  const std::vector<BaseTable *> &tables, BaseTable* default_table,
   const std::unordered_map<std::string, std::string> & table_alias_map)
 {
   ASSERT(field_name_ != "*", "ERROR!");
   const char* table_name = table_name_.c_str();
   const char* field_name = field_name_.c_str();
-  Table* table = nullptr;
+  BaseTable * table = nullptr;
   if (!common::is_blank(table_name)) { // 表名不为空
     // check table
     auto it = table_map.find(table_name);
@@ -834,7 +834,7 @@ SubQueryExpr::SubQueryExpr(const SelectSqlNode& sql_node)
   sql_node_ = std::make_unique<SelectSqlNode>(sql_node);
 }
 
-RC SubQueryExpr::generate_select_stmt(Db* db, const std::unordered_map<std::string, Table *> &tables)
+RC SubQueryExpr::generate_select_stmt(Db* db, const std::unordered_map<std::string, BaseTable *> &tables)
 {
   Stmt* select_stmt = nullptr;
   if (RC rc = SelectStmt::create(db, *sql_node_.get(), select_stmt, tables); RC::SUCCESS != rc) {
@@ -914,5 +914,14 @@ AttrType SubQueryExpr::value_type() const
 
 std::unique_ptr<Expression> SubQueryExpr::deep_copy() const 
 { 
-  return {}; 
+  SelectSqlNode new_select_sql;
+  new_select_sql.deep_copy(*sql_node_);
+  auto new_expr = std::make_unique<SubQueryExpr>(new_select_sql);
+  new_expr->set_name(name());
+  new_expr->set_alias(alias());
+  // TODO 这里不考虑其他
+  if (stmt_ || logical_oper_ || physical_oper_) {
+    LOG_ERROR("ERROR! in subquery expr deep copy");
+  }
+  return new_expr;
 }

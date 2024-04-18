@@ -40,10 +40,12 @@ enum class PhysicalOperatorType
   CREATE_TABLE,
   TABLE_SCAN,
   INDEX_SCAN,
+  VIEW_SCAN,
   NESTED_LOOP_JOIN,
   EXPLAIN,
   PREDICATE,
   PROJECT,
+  DUAL_TABLE_SCAN,
   CALC,
   STRING_LIST,
   DELETE,
@@ -51,7 +53,6 @@ enum class PhysicalOperatorType
   UPDATE,
   GROUPBY,
   ORDERBY,
-  DUAL_TABLE_SCAN,
 };
 
 /**

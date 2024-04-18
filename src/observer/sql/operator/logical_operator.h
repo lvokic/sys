@@ -35,13 +35,14 @@ enum class LogicalOperatorType
   CALC,
   CREATE_TABLE,
   TABLE_GET,  ///< 从表中获取数据
+  VIEW_GET,
   PREDICATE,  ///< 过滤，就是谓词
   PROJECTION, ///< 投影，就是select
   JOIN,       ///< 连接
   INSERT,     ///< 插入
   DELETE,     ///< 删除，删除可能会有子查询
-  UPDATE,     ///< 更新
   EXPLAIN,    ///< 查看执行计划
+  UPDATE,
   GROUPBY,
   ORDERBY,
 };

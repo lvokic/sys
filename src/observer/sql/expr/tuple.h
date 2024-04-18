@@ -110,6 +110,9 @@ public:
    */
   virtual RC find_cell(const TupleCellSpec &spec, Value &cell,int &index) const = 0;
 
+  virtual int get_tuple_size() const = 0;
+  virtual RC get_tuple_rid(int tuple_idx, const BaseTable *&table, RID &rid) const = 0;
+
   virtual std::string to_string() const
   {
     std::string str;
@@ -159,13 +162,38 @@ public:
   void set_schema(const Table *table)
   {
     ASSERT(nullptr != table, "RowTuple set_schema with a null table");
-    table_ = table;
+    table_ = static_cast<BaseTable*>(const_cast<Table*>(table));
     const std::vector<FieldMeta> *fields = table_->table_meta().field_metas();
     this->speces_.clear();//有的算子会 反复open close 
     this->speces_.reserve(fields->size());
     for (const FieldMeta &field : *fields) {
-      speces_.push_back(new FieldExpr(table, &field));
+      speces_.push_back(new FieldExpr(table_, &field));
     }
+  }
+
+  void set_schema(const View *view) 
+  {
+    ASSERT(nullptr != view, "RowTuple set_schema with a null view");
+    table_ = static_cast<BaseTable*>(const_cast<View*>(view));
+    const std::vector<FieldMeta> *fields = table_->table_meta().field_metas();
+    this->speces_.reserve(fields->size());
+    for (const FieldMeta &field : *fields) {
+      speces_.push_back(new FieldExpr(table_, &field));
+    }
+  }
+
+  int get_tuple_size() const override
+  {
+    return 1;
+  }
+  RC get_tuple_rid(int tuple_idx, const BaseTable *&table, RID &rid) const override
+  {
+    if (0 < tuple_idx) {
+      return RC::INVALID_ARGUMENT;
+    }
+    table = table_;
+    rid = record_->rid();
+    return RC::SUCCESS;
   }
 
   void set_schema(const Table *table, const std::vector<FieldMeta> *fields) {
@@ -196,11 +224,15 @@ public:
       FieldExpr *field_expr = speces_[index];
       const FieldMeta *field_meta = field_expr->field().meta();
       if (field_meta->type() == TEXTS) {
+        if (!table_->is_table()) {
+          LOG_WARN("can not read text from view");
+          return RC::SCHEMA_FIELD_MISSING;
+        }
         cell.set_type(CHARS);
         int64_t offset = *(int64_t*)(record_->data() + field_meta->offset());
         int     length = *(int64_t*)(record_->data() + field_meta->offset() + sizeof(int64_t));
         char*   text   = (char*)malloc(length);
-        rc             = table_->read_text(offset, length, text);
+        rc = static_cast<const Table*>(table_)->read_text(offset, length, text);
         if (RC::SUCCESS != rc) {
           LOG_WARN("Failed to read text from table, rc=%s", strrc(rc));
           return rc;
@@ -234,6 +266,29 @@ public:
     return RC::NOTFOUND;
   }
 
+  RC add_table_rid_into_map(const BaseTable* table, RID rid) 
+  {
+    auto iter = tables_rid_.find(table);
+    if (tables_rid_.end() == iter) {
+      tables_rid_.emplace(table, rid);
+    } else {
+      if (iter->second == rid) {
+        return RC::INTERNAL;
+      }
+    }
+    return RC::SUCCESS;
+  }
+
+  std::unordered_map<const BaseTable*, RID> &get_table_rid_map()
+  {
+    return tables_rid_;
+  }
+
+  void clear_map()
+  {
+    tables_rid_.clear();
+  }
+
 #if 0
   RC cell_spec_at(int index, const TupleCellSpec *&spec) const override
   {
@@ -259,8 +314,11 @@ public:
 private:
   Record *record_ = nullptr;
   common::Bitmap bitmap_;
-  const Table *table_ = nullptr;
+  const BaseTable *table_ = nullptr;
   std::vector<FieldExpr *> speces_;
+
+  // 记录来自不同表的Record的RID
+  std::unordered_map<const BaseTable*, RID> tables_rid_;
 };
 
 /**
@@ -313,6 +371,16 @@ public:
   {
     return exprs_;
   }
+
+  int get_tuple_size() const override
+  {
+    return tuple_->get_tuple_size();
+  }
+  RC get_tuple_rid(int tuple_idx, const BaseTable *&table, RID &rid) const override
+  {
+    return tuple_->get_tuple_rid(tuple_idx, table, rid);
+  }
+
 #if 0
   RC cell_spec_at(int index, const TupleCellSpec *&spec) const override
   {
@@ -367,6 +435,14 @@ public:
     return RC::NOTFOUND;
   }
 
+  int get_tuple_size() const override
+  {
+    return 0;
+  }
+  RC get_tuple_rid(int tuple_idx, const BaseTable *&table, RID &rid) const override
+  {
+    return RC::INVALID_ARGUMENT;
+  }
 
 private:
   const std::vector<std::unique_ptr<Expression>> &expressions_;
@@ -405,6 +481,15 @@ public:
   virtual RC find_cell(const TupleCellSpec &spec, Value &cell,int &index) const override
   {
     return RC::INTERNAL;
+  }
+
+  int get_tuple_size() const override
+  {
+    return 0;
+  }
+  RC get_tuple_rid(int tuple_idx, const BaseTable *&table, RID &rid) const override
+  {
+    return RC::INVALID_ARGUMENT;
   }
 
 private:
@@ -465,6 +550,21 @@ public:
     }
     index += left_->cell_num();
     return rc;
+  }
+
+  int get_tuple_size() const override
+  {
+    return left_->get_tuple_size() + right_->get_tuple_size();
+  }
+  RC get_tuple_rid(int tuple_idx, const BaseTable *&table, RID &rid) const override
+  {
+    if (tuple_idx > get_tuple_size() - 1) {
+      return RC::INVALID_ARGUMENT;
+    }
+    if (left_->get_tuple_size() >= tuple_idx + 1) {
+      return left_->get_tuple_rid(tuple_idx, table, rid);
+    }
+    return right_->get_tuple_rid(tuple_idx - left_->get_tuple_size(), table, rid);
   }
 
 private:
@@ -538,6 +638,15 @@ public:
     ////因为 GroupTuple 有两个存放结果的 vector ，所以给 aggr_results_ 返回的 index 加上一个偏移量
     index += field_results_.size();
     return RC::SUCCESS;
+  }
+
+  int get_tuple_size() const override
+  {
+    return 0;
+  }
+  RC get_tuple_rid(int tuple_idx, const BaseTable *&table, RID &rid) const override
+  {
+    return RC::INTERNAL;
   }
 
   void init(std::vector<std::unique_ptr<AggrFuncExpr>> &&aggr_exprs,
@@ -746,11 +855,20 @@ public:
   EmptyTuple() = default;
   virtual ~EmptyTuple() = default;
 
-  int cell_num() const { return 0; }
+  int cell_num() const override { return 0; }
 
-  RC cell_at(int index, Value &cell) const { return RC::INVALID_ARGUMENT; }
+  RC cell_at(int index, Value &cell) const override { return RC::INVALID_ARGUMENT; }
 
-  RC find_cell(const TupleCellSpec &spec, Value &cell,int &index) const { return RC::INVALID_ARGUMENT; }
+  RC find_cell(const TupleCellSpec &spec, Value &cell,int &index) const override { return RC::INVALID_ARGUMENT; }
+
+  int get_tuple_size() const override
+  {
+    return 0;
+  }
+  RC get_tuple_rid(int tuple_idx, const BaseTable *&table, RID &rid) const override
+  {
+    return RC::INTERNAL;
+  }
 };
 
 /**
@@ -820,6 +938,15 @@ public:
   std::vector<std::unique_ptr<Expression>> &exprs()
   {
     return exprs_;
+  }
+
+  int get_tuple_size() const override
+  {
+    return 0;
+  }
+  RC get_tuple_rid(int tuple_idx, const BaseTable *&table, RID &rid) const override
+  {
+    return RC::INTERNAL;
   }
 
 private:
