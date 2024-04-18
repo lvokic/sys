@@ -77,9 +77,9 @@ RC ViewScanPhysicalOperator::next()
   RC rc = RC::SUCCESS;
 
   bool filter_result = false;
-  int  field_num      = view_->table_meta().field_num();
-  int  sys_field_num  = view_->table_meta().sys_field_num();
-  int  null_offset    = view_->table_meta().null_field()->offset();
+  int  field_num     = view_->table_meta().field_num();
+  int  sys_field_num = view_->table_meta().sys_field_num();
+  int  null_offset   = view_->table_meta().null_field()->offset();
   tuple_.clear_map();
 
   while (RC::SUCCESS == (rc = physical_oper_->next())) {
@@ -89,7 +89,7 @@ RC ViewScanPhysicalOperator::next()
     memset(record_data_, 0, record_size_);
     common::Bitmap record_bitmap(record_data_ + null_offset, field_num);
     for (size_t col_idx = 0; col_idx < tuple->cell_num(); col_idx++) {
-      Value view_col_val;
+      Value            view_col_val;
       const FieldMeta *table_field_meta = view_->table_meta().field(col_idx + sys_field_num);
       // TODO: TEXT类型期望只拿到位置信息，不拿原始字符串
       tuple->cell_at(col_idx, view_col_val);
@@ -102,9 +102,9 @@ RC ViewScanPhysicalOperator::next()
     tuple_.set_record(&view_record_);
 
     int tuple_size = tuple->get_tuple_size();
-    for (int i = 0; i < tuple->get_tuple_size(); ++i) {
+    for (int i = 0; i < tuple->get_tuple_size(); i++) {
       const BaseTable *table;
-      RID rid;
+      RID              rid;
       rc = tuple->get_tuple_rid(i, table, rid);
       if (RC::SUCCESS != rc) {
         LOG_ERROR("failed to get table_rid [%d] from tuple, tuple_size=%d", i, tuple->get_tuple_size());
@@ -123,10 +123,10 @@ RC ViewScanPhysicalOperator::next()
     }
 
     if (filter_result) {
-      sql_debug("get a tuple: %s", tuple_.to_string().c_str());
+      sql_debug("view get a tuple: %s", tuple_.to_string().c_str());
       break;
     } else {
-      sql_debug("a tuple is filtered: %s", tuple_.to_string().c_str());
+      sql_debug("view a tuple is filtered: %s", tuple_.to_string().c_str());
       rc = RC::RECORD_EOF;
     }
   }

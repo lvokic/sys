@@ -44,13 +44,13 @@ RC InsertPhysicalOperator::open(Trx *trx)
 
 RC InsertPhysicalOperator::insert_into_table(Trx *trx)
 {
-  RC rc = RC::SUCCESS;
+  RC                  rc = RC::SUCCESS;
   std::vector<Record> records;
   records.resize(values_.size());
-  Table *table_ = static_cast<Table*>(base_table_);
+  Table *table_ = static_cast<Table *>(base_table_);
   for (int i = 0; i < values_.size(); ++i) {
-    auto& rcd = records[i];
-    rc = table_->make_record(static_cast<int>(values_[i].size()), values_[i].data(), rcd);
+    auto &rcd = records[i];
+    rc        = table_->make_record(static_cast<int>(values_[i].size()), values_[i].data(), rcd);
     if (rc != RC::SUCCESS) {
       LOG_WARN("failed to make record. rc=%s", strrc(rc));
       return rc;
@@ -62,7 +62,7 @@ RC InsertPhysicalOperator::insert_into_table(Trx *trx)
       RC rc2 = RC::SUCCESS;
       for (int j = i - 1; j >= 0; j--) {
         Record &done_rcd = records[j];
-        rc2 = trx->delete_record(table_, done_rcd);
+        rc2              = trx->delete_record(table_, done_rcd);
         if (RC::SUCCESS != rc2) {
           LOG_WARN("failed to rollback record after insert failed. rc=%s", strrc(rc2));
           break;
@@ -76,25 +76,25 @@ RC InsertPhysicalOperator::insert_into_table(Trx *trx)
 
 RC InsertPhysicalOperator::insert_into_view(Trx *trx)
 {
-  RC rc = RC::SUCCESS;
-  View *view = static_cast<View*>(base_table_);
+  RC    rc   = RC::SUCCESS;
+  View *view = static_cast<View *>(base_table_);
   if (!view->allow_write()) {
     LOG_ERROR("view %s is not allow to insert", view->name());
     return RC::SCHEMA_FIELD_MISSING;
   }
 
-  /*  
+  /*
    *  首先将map_field按照表分类，记录下每张表中有哪些view_col、
    *  | table_1: view_col_1, view_col_3 | table_2: view_col_2 |
-   *  
+   *
    *  记录view_col在原始表中的位置
    *  | table_1: 3, 1 | table_2: 2 |
-   */  
-  const std::vector<Field> map_fields = view->get_map_fields();
-  std::unordered_map<const BaseTable*, std::vector<int>> view_col_idx;
+   */
+  const std::vector<Field>                                map_fields = view->get_map_fields();
+  std::unordered_map<const BaseTable *, std::vector<int>> view_col_idx;
   for (int i = 0; i < map_fields.size(); ++i) {
     const Field &field = map_fields[i];
-    auto iter = view_col_idx.find(field.table());
+    auto         iter  = view_col_idx.find(field.table());
     if (view_col_idx.end() == iter) {
       view_col_idx.emplace(field.table(), std::vector<int>{i});
     } else {
@@ -103,11 +103,11 @@ RC InsertPhysicalOperator::insert_into_view(Trx *trx)
   }
 
   // 查找view中的列在原始表中的位置
-  std::unordered_map<const BaseTable*, std::vector<int>> field_idx_in_tables;
+  std::unordered_map<const BaseTable *, std::vector<int>> field_idx_in_tables;
   for (auto iter : view_col_idx) {
     std::vector<int> field_idx_in_one_table;
-    const BaseTable *table = iter.first;
-    const int sys_field_num = table->table_meta().sys_field_num();
+    const BaseTable *table         = iter.first;
+    const int        sys_field_num = table->table_meta().sys_field_num();
     std::vector<int> cols_in_table = iter.second;
     for (auto col_idx : cols_in_table) {
       int field_idx = table->table_meta().find_field_idx_by_name(map_fields[col_idx].field_name());
@@ -122,12 +122,13 @@ RC InsertPhysicalOperator::insert_into_view(Trx *trx)
   for (auto col_of_table : view_col_idx) {
     // 对一张原始表插入
     const BaseTable *base_table = col_of_table.first;
-    Table *table = static_cast<Table*>(const_cast<BaseTable*>(base_table));
+    Table           *table      = static_cast<Table *>(const_cast<BaseTable *>(base_table));
 
     const std::vector<int> &field_idx_in_one_table = field_idx_in_tables[table];
     for (std::vector<Value> row_value : values_) {
       // 补齐一行数据
-      std::vector<Value> fixed_row_value(table->table_meta().field_num() - table->table_meta().sys_field_num(), {NULLS, nullptr, 0});
+      std::vector<Value> fixed_row_value(
+          table->table_meta().field_num() - table->table_meta().sys_field_num(), {NULLS, nullptr, 0});
       for (size_t i = 0; i < field_idx_in_one_table.size(); ++i) {
         fixed_row_value[field_idx_in_one_table[i]] = row_value[col_of_table.second[i]];
       }
@@ -149,12 +150,6 @@ RC InsertPhysicalOperator::insert_into_view(Trx *trx)
   return rc;
 }
 
-RC InsertPhysicalOperator::next()
-{
-  return RC::RECORD_EOF;
-}
+RC InsertPhysicalOperator::next() { return RC::RECORD_EOF; }
 
-RC InsertPhysicalOperator::close()
-{
-  return RC::SUCCESS;
-}
+RC InsertPhysicalOperator::close() { return RC::SUCCESS; }

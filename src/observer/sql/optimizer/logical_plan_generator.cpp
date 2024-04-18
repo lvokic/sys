@@ -126,14 +126,18 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
 
   const std::vector<SelectStmt::JoinTables> &tables = select_stmt->join_tables();
 
-  auto process_one_table = [/*, &all_fields*/](unique_ptr<LogicalOperator> &prev_oper, BaseTable *table, FilterStmt *fu) {
-    std::vector<Field>          fields;
+  auto process_one_table = [/*, &all_fields*/](unique_ptr<LogicalOperator> &prev_oper,
+                               BaseTable                                   *table,
+                               FilterStmt                                  *fu,
+                               const std::string                           &alias) {
+    std::vector<Field> fields;  // TODO(wbj) 现在没用这个
     unique_ptr<LogicalOperator> table_get_oper;
     if (table->is_table()) {
-      unique_ptr<LogicalOperator> table_get(new TableGetLogicalOperator(static_cast<Table*>(table), fields, true/*readonly*/));
+      unique_ptr<LogicalOperator> table_get(
+          new TableGetLogicalOperator(static_cast<Table *>(table), fields, true /*readonly*/, alias));
       table_get_oper = std::move(table_get);
     } else {
-      unique_ptr<LogicalOperator> view_get(new ViewGetLogicalOperator(static_cast<View*>(table), fields, true));
+      unique_ptr<LogicalOperator> view_get(new ViewGetLogicalOperator(static_cast<View *>(table), fields, true));
       table_get_oper = std::move(view_get);
     }
     unique_ptr<LogicalOperator> predicate_oper;
@@ -144,6 +148,7 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
       }
     }
     if (prev_oper == nullptr) {
+      // ASSERT(nullptr == fu, "ERROR!");
       if (predicate_oper) {
         static_cast<TableGetLogicalOperator *>(table_get_oper.get())
             ->set_predicates(std::move(predicate_oper->expressions()));
@@ -165,12 +170,13 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
 
   unique_ptr<LogicalOperator> outside_prev_oper(nullptr);  // 笛卡尔积
   for (auto &jt : tables) {
-    unique_ptr<LogicalOperator> prev_oper(nullptr);  // inner join
+    unique_ptr<LogicalOperator> prev_oper(nullptr);  // INNER JOIN
     auto                       &join_tables = jt.join_tables();
     auto                       &on_conds    = jt.on_conds();
+    auto                       &alias       = jt.alias();
     ASSERT(join_tables.size() == on_conds.size(), "ERROR!");
     for (size_t i = 0; i < join_tables.size(); ++i) {
-      if (rc = process_one_table(prev_oper, join_tables[i], on_conds[i]); rc != RC::SUCCESS) {
+      if (rc = process_one_table(prev_oper, join_tables[i], on_conds[i], alias[i]); RC::SUCCESS != rc) {
         return rc;
       }
     }
@@ -186,7 +192,7 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
   }
 
   // set top oper
-  ASSERT(outside_prev_oper, "ERROR!");
+  ASSERT(outside_prev_oper, "ERROR!");                                  // TODO(wbj) Why doesn't work?
   unique_ptr<LogicalOperator> top_oper = std::move(outside_prev_oper);  // maybe null
 
   if (select_stmt->filter_stmt() != nullptr) {
@@ -203,20 +209,24 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
       top_oper = std::move(predicate_oper);
     }
   }
-
   if (select_stmt->groupby_stmt()) {
-    // 为 groupby 加一个 sort 算子
-    // 先构造 orderby_unit
-    auto &group_fields = select_stmt->groupby_stmt()->get_groupby_fields();
+    // 为 groupby_oper 加一个sort 子算子
+    // 1.先构造 orderby_unit
+    auto                                &group_fields = select_stmt->groupby_stmt()->get_groupby_fields();
     std::vector<unique_ptr<OrderByUnit>> order_units;
     for (auto &expr : group_fields) {
-      order_units.emplace_back(std::make_unique<OrderByUnit>(expr->deep_copy().release(), true));
+      order_units.emplace_back(
+          std::make_unique<OrderByUnit>(expr->deep_copy().release(), true));  // 这里指针需要深拷贝一份给 order by
     }
 
-    //  2 .需要将 groupy_oper 中的 field_expr ,和 groupby 后的 expr  复制一份传递给 orderby 算子
+    //  2 .需要将 groupy_oper 中的 field_expr ,和 groupby  后的expr  复制一份传递给 orderby 算子
     std::vector<std::unique_ptr<Expression>> field_exprs;
-    auto &field = select_stmt->groupby_stmt()->get_field_exprs();
+    auto                                    &field = select_stmt->groupby_stmt()->get_field_exprs();
     for (auto &expr : field) {
+      field_exprs.emplace_back(expr->deep_copy().release());
+    }
+    auto &tmp = select_stmt->groupby_stmt()->get_groupby_fields();
+    for (auto &expr : tmp) {
       field_exprs.emplace_back(expr->deep_copy().release());
     }
 
@@ -243,7 +253,7 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
   if (select_stmt->having_stmt() != nullptr) {
     unique_ptr<LogicalOperator> predicate_oper;
     rc = create_plan(select_stmt->having_stmt(), predicate_oper);
-    if (RC::SUCCESS != rc) {
+    if (rc != RC::SUCCESS) {
       LOG_WARN("failed to create having predicate logical plan. rc=%s", strrc(rc));
       return rc;
     }
@@ -269,7 +279,6 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
       top_oper = std::move(orderby_oper);
     }
   }
-
   {
     unique_ptr<LogicalOperator> project_oper(new ProjectLogicalOperator(std::move(select_stmt->projects())));
     ASSERT(project_oper, "ERROR!");
