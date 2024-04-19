@@ -38,15 +38,13 @@ AttrType attr_type_from_string(const char *s)
   return UNDEFINED;
 }
 
-Value::Value(int val){ set_int(val); }
+Value::Value(int val) { set_int(val); }
 
-Value::Value(float val){ set_float(val); }
+Value::Value(float val) { set_float(val); }
 
-Value::Value(bool val){ set_boolean(val); }
+Value::Value(bool val) { set_boolean(val); }
 
-Value::Value(const char *s, int len /*= 0*/){ set_string(s, len); }
-
-Value::Value(Date date) { set_date(date); }
+Value::Value(const char *s, int len /*= 0*/) { set_string(s, len); }
 
 void Value::set_data(char *data, int length)
 {
@@ -56,19 +54,19 @@ void Value::set_data(char *data, int length)
     } break;
     case INTS: {
       num_value_.int_value_ = *(int *)data;
-      length_ = length;
+      length_               = length;
     } break;
     case FLOATS: {
       num_value_.float_value_ = *(float *)data;
-      length_ = length;
+      length_                 = length;
     } break;
     case BOOLEANS: {
       num_value_.bool_value_ = *(int *)data != 0;
-      length_ = length;
+      length_                = length;
     } break;
     case DATES: {
-      num_value_.date_value_ = *(Date *)data;
-      length_ = length;
+      num_value_.int_value_ = *(int *)data;
+      length_               = length;
     } break;
     default: {
       LOG_WARN("unknown data type: %d", attr_type_);
@@ -76,25 +74,29 @@ void Value::set_data(char *data, int length)
   }
 }
 
-void Value::set_int(int val) {
-  attr_type_ = INTS;
+void Value::set_int(int val)
+{
+  attr_type_            = INTS;
   num_value_.int_value_ = val;
-  length_ = sizeof(val);
+  length_               = sizeof(val);
 }
 
-void Value::set_float(float val) {
-  attr_type_ = FLOATS;
+void Value::set_float(float val)
+{
+  attr_type_              = FLOATS;
   num_value_.float_value_ = val;
-  length_ = sizeof(val);
+  length_                 = sizeof(val);
 }
 
-void Value::set_boolean(bool val) {
-  attr_type_ = BOOLEANS;
+void Value::set_boolean(bool val)
+{
+  attr_type_             = BOOLEANS;
   num_value_.bool_value_ = val;
-  length_ = sizeof(val);
+  length_                = sizeof(val);
 }
 
-void Value::set_string(const char *s, int len /*= 0*/) {
+void Value::set_string(const char *s, int len /*= 0*/)
+{
   attr_type_ = CHARS;
   if (len > 0) {
     len = strnlen(s, len);
@@ -105,15 +107,17 @@ void Value::set_string(const char *s, int len /*= 0*/) {
   length_ = str_value_.length();
 }
 
-void Value::set_date(Date date) {
-  attr_type_ = DATES;
-  num_value_.date_value_ = date;
-  length_ = sizeof(date);
+void Value::set_date(int val)
+{
+  attr_type_            = DATES;
+  num_value_.int_value_ = val;
+  length_               = sizeof(val);
 }
 
 void Value::set_value(const Value &value)
 {
   switch (value.attr_type_) {
+    case DATES:
     case INTS: {
       set_int(value.get_int());
     } break;
@@ -125,9 +129,6 @@ void Value::set_value(const Value &value)
     } break;
     case BOOLEANS: {
       set_boolean(value.get_boolean());
-    } break;
-    case DATES: {
-      set_date(value.get_date());
     } break;
     case UNDEFINED: {
       ASSERT(false, "got an invalid value type");
@@ -164,7 +165,7 @@ std::string Value::to_string() const
       os << str_value_;
     } break;
     case DATES: {
-      os << Date::to_string(num_value_.date_value_);
+      os << date_to_string(num_value_.int_value_);
     } break;
     default: {
       LOG_WARN("unsupported attr type: %d", attr_type_);
@@ -177,6 +178,7 @@ int Value::compare(const Value &other) const
 {
   if (this->attr_type_ == other.attr_type_) {
     switch (this->attr_type_) {
+      case DATES:
       case INTS: {
         return common::compare_int((void *)&this->num_value_.int_value_, (void *)&other.num_value_.int_value_);
       } break;
@@ -191,9 +193,6 @@ int Value::compare(const Value &other) const
       } break;
       case BOOLEANS: {
         return common::compare_int((void *)&this->num_value_.bool_value_, (void *)&other.num_value_.bool_value_);
-      } break;
-      case DATES: {
-        return Date::compare_date(&num_value_.date_value_, &other.num_value_.date_value_);
       } break;
       default: {
         LOG_WARN("unsupported type: %d", this->attr_type_);
@@ -221,6 +220,7 @@ int Value::get_int() const
         return 0;
       }
     }
+    case DATES:
     case INTS: {
       return num_value_.int_value_;
     }
@@ -266,10 +266,7 @@ float Value::get_float() const
   return 0;
 }
 
-std::string Value::get_string() const
-{
-  return this->to_string();
-}
+std::string Value::get_string() const { return this->to_string(); }
 
 bool Value::get_boolean() const
 {
@@ -310,40 +307,25 @@ bool Value::get_boolean() const
   return false;
 }
 
-bool Value::convert(AttrType from, AttrType to, Value &value) {
-  if (from == to) {
-    return true;
+RC Value::type_caset(AttrType target_type)
+{
+  if (target_type == attr_type_)
+    return RC::SUCCESS;
+  switch (target_type) {
+    case INTS: {
+      int tmp = get_int();
+      set_int(tmp);
+    } break;
+    case FLOATS: {
+      float tmp = get_float();
+      set_float(tmp);
+    } break;
+    case CHARS: {
+      std::string tmp = get_string();
+      set_string(tmp.c_str());
+    } break;
+    default:
+      break;
   }
-  if (from == CHARS) {
-    if (to == DATES) {
-      Date date = value.get_date();
-      if (date == INVALID_DATE) return false;
-      value.set_date(date);
-      return true;
-    } else if (to == INTS) {
-      value.set_int(value.get_int());
-      return true;
-    } else if (to == FLOATS) {
-      value.set_float(value.get_float());
-      return true;
-    }
-  }
-  if (from == INTS && to == FLOATS) {
-    value.set_float(value.get_float());
-    return true;
-  }
-  if (from == FLOATS && to == INTS) {
-    value.set_int(value.get_int());
-    return true;
-  }
-  return false;
-}
-
-Date Value::get_date() const {
-  switch (attr_type())
-  {
-  case DATES: return num_value_.date_value_;
-  case CHARS: return Date(str_value_);
-  default: return INVALID_DATE;
-  }
+  return RC::SUCCESS;
 }

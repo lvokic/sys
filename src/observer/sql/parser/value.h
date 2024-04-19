@@ -14,8 +14,9 @@ See the Mulan PSL v2 for more details. */
 
 #pragma once
 
-#include "sql/parser/date.h"
 #include <string>
+#include <common/rc.h>
+#include <common/time/date.h>
 
 /**
  * @brief 属性的类型
@@ -51,7 +52,6 @@ public:
   explicit Value(int val);
   explicit Value(float val);
   explicit Value(bool val);
-  explicit Value(Date date);
   explicit Value(const char *s, int len = 0);
 
   Value(const Value &other) = default;
@@ -70,7 +70,7 @@ public:
   void set_float(float val);
   void set_boolean(bool val);
   void set_string(const char *s, int len = 0);
-  void set_date(Date date);
+  void set_date(int val);
   void set_value(const Value &value);
 
   std::string to_string() const;
@@ -88,6 +88,8 @@ public:
     return attr_type_;
   }
 
+  RC type_caset(AttrType target_type);
+
 public:
   /**
    * 获取对应的值
@@ -97,7 +99,6 @@ public:
   float get_float() const;
   std::string get_string() const;
   bool get_boolean() const;
-  Date get_date() const;
 
 public:
   /**
@@ -114,7 +115,6 @@ private:
     int int_value_;
     float float_value_;
     bool bool_value_;
-    Date date_value_;
   } num_value_;
   std::string str_value_;
 };
